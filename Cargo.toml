@@ -1,0 +1,12 @@
+[package]
+name = "rumpus_benchmark"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = { version = "0.4.42", features = ["serde"] }
+image = "0.25.9"
+rayon = "1.11.0"
+rumpus = { git = "https://github.com/benjaminpotter/rumpus.git", tag="0.4.0" }
+sguaba = "0.9.11"
+uom = "0.37.0"
