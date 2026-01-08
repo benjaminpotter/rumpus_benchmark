@@ -3,16 +3,16 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rumpus::{
     CameraEnu, CameraFrd,
     camera::{Camera, Lens},
-    image::{ImageSensor, IntensityImage, RayImage},
-    iter::RayIterator,
+    image::{ImageSensor, RayImage},
     model::SkyModel,
-    ray::{GlobalFrame, Ray, RayFrame, SensorFrame},
+    ray::{GlobalFrame, Ray},
+};
+use rumpus_benchmark::{
+    io::{DatasetReader, ImageReader},
+    utils::{rays_to_bytes, sensor_to_global, write_image},
 };
 use sguaba::{Bearing, Coordinate, engineering::Orientation, systems::Wgs84};
-use std::{
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 use uom::{
     ConstZero,
     si::{
@@ -25,69 +25,96 @@ use uom::{
 const FOCAL_LENGTH_MM: f64 = 8.0;
 
 struct Config {
+    max_frames: Option<usize>,
     write_images: bool,
 }
 
 fn main() {
-    let config = Config { write_images: true };
-
-    let sim = make_simulation();
-    let result = sim.simulate();
-
-    // Define required parameters.
-    let input_path = "../rumpus/testing/intensity.png";
-    // TODO: Is this the right pixel size?
-    let pixel_size = Length::new::<micron>(3.45);
-    let image_reader = ImageReader { pixel_size };
-
-    // TODO: Convert to global frame.
-    let image = image_reader.read_image(input_path).unwrap();
-    // TODO: Is this the right focal length?
-    let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
-    let lens = Lens::from_focal_length(focal_length).expect("focal length is greater than zero");
-    let orientation = Orientation::<CameraEnu>::tait_bryan_builder()
-        .yaw(Angle::new::<degree>(0.0))
-        .pitch(Angle::new::<degree>(0.0))
-        .roll(Angle::new::<degree>(0.0))
-        .build();
-    let cam = Camera::new(lens, orientation);
-    let zenith_coord = cam
-        .trace_from_sky(
-            Bearing::<CameraEnu>::builder()
-                .azimuth(Angle::ZERO)
-                .elevation(Angle::HALF_TURN / 2.)
-                .expect("elevation is on range -90 to 90")
-                .build(),
-        )
-        .expect("zenith is always above the horizon");
-    let ray_image = sensor_to_global(&image, &zenith_coord);
-
-    // Print the ground truth position
-    // Highlight if its tilted
-    // For aop and dop:
-    // Print the rms error
-    // Print the standard error
-    // Could do rms error when low dop are excluded
-    // Create new directory with results
-    // Name directory using timestamp
-    // Write out all four images
+    let config = Config {
+        write_images: true,
+        max_frames: Some(1),
+    };
 
     let timestamp = Local::now().to_rfc3339();
     let results_dir = PathBuf::from(&timestamp);
     std::fs::create_dir(&results_dir).unwrap();
 
-    for (prefix, ray_image) in [("simulated", result.ray_image()), ("measured", &ray_image)] {
-        let (aop_image, dop_image) = rays_to_bytes(ray_image);
+    let dataset_path = "/home/ben-work/git/secondary/polcam_dataset/2025-11-24/rmc";
+    let mut reader = DatasetReader::from_path(&dataset_path).unwrap();
 
-        let filename = format!("{}_aop.png", prefix);
-        let mut path = results_dir.clone();
-        path.push(&filename);
-        write_image(path, &aop_image, 1224, 1024).unwrap();
+    let mut frame_count = 0;
+    while let Some(result) = reader.read_frame() {
+        let Ok(frame) = result else {
+            eprintln!("failed to read frame");
+            break;
+        };
 
-        let filename = format!("{}_dop.png", prefix);
-        let mut path = results_dir.clone();
-        path.push(&filename);
-        write_image(path, &dop_image, 1224, 1024).unwrap();
+        let sim = make_simulation();
+        let result = sim.simulate();
+
+        // Define required parameters.
+        let input_path = "../rumpus/testing/intensity.png";
+        // TODO: Is this the right pixel size?
+        let pixel_size = Length::new::<micron>(3.45);
+        let image_reader = ImageReader::new(pixel_size);
+
+        // TODO: Convert to global frame.
+        let image = image_reader.read_image(input_path).unwrap();
+        // TODO: Is this the right focal length?
+        let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
+        let lens =
+            Lens::from_focal_length(focal_length).expect("focal length is greater than zero");
+        let orientation = Orientation::<CameraEnu>::tait_bryan_builder()
+            .yaw(Angle::new::<degree>(0.0))
+            .pitch(Angle::new::<degree>(0.0))
+            .roll(Angle::new::<degree>(0.0))
+            .build();
+        let cam = Camera::new(lens, orientation);
+        let zenith_coord = cam
+            .trace_from_sky(
+                Bearing::<CameraEnu>::builder()
+                    .azimuth(Angle::ZERO)
+                    .elevation(Angle::HALF_TURN / 2.)
+                    .expect("elevation is on range -90 to 90")
+                    .build(),
+            )
+            .expect("zenith is always above the horizon");
+        let ray_image = sensor_to_global(&image, &zenith_coord);
+
+        // Print the ground truth position
+        // Highlight if its tilted
+        // For aop and dop:
+        // Print the rms error
+        // Print the standard error
+        // Could do rms error when low dop are excluded
+        // Create new directory with results
+        // Name directory using timestamp
+        // Write out all four images
+
+        if config.write_images {
+            for (prefix, ray_image) in [("simulated", result.ray_image()), ("measured", &ray_image)]
+            {
+                let (aop_image, dop_image) = rays_to_bytes(ray_image);
+
+                let filename = format!("{}_aop.png", prefix);
+                let mut path = results_dir.clone();
+                path.push(&filename);
+                write_image(path, &aop_image, 1224, 1024).unwrap();
+
+                let filename = format!("{}_dop.png", prefix);
+                let mut path = results_dir.clone();
+                path.push(&filename);
+                write_image(path, &dop_image, 1224, 1024).unwrap();
+            }
+        }
+
+        if let Some(max_frames) = config.max_frames
+            && frame_count >= max_frames
+        {
+            break;
+        }
+
+        frame_count += 1;
     }
 }
 
@@ -131,41 +158,6 @@ struct SimulationResult {
 impl SimulationResult {
     fn ray_image(&self) -> &RayImage<GlobalFrame> {
         &self.ray_image
-    }
-}
-
-struct ImageReader {
-    pixel_size: Length,
-}
-
-impl ImageReader {
-    fn read_image<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> Result<RayImage<SensorFrame>, Box<dyn Error + 'static>> {
-        // Open a new image and ensure it is in single channel greyscale format.
-        let raw_image = image::ImageReader::open(&path)?.decode()?.into_luma8();
-
-        // Create a new IntensityImage from the input image.
-        let (width, height) = raw_image.dimensions();
-        let intensity_image =
-            IntensityImage::from_bytes(width as u16, height as u16, &raw_image.into_raw())
-                .expect("image dimensions are even");
-
-        // Filter the rays from the intensity image by DoP.
-        // Convert the sparse RayIterator into a dense RayImage using the specs of
-        // the image sensor as a RaySensor.
-        let ray_image: RayImage<SensorFrame> = intensity_image
-            .rays(self.pixel_size, self.pixel_size)
-            .ray_image(&ImageSensor::new(
-                self.pixel_size,
-                self.pixel_size,
-                intensity_image.height(),
-                intensity_image.width(),
-            ))
-            .expect("no ray hits the same pixel");
-
-        Ok(ray_image)
     }
 }
 
@@ -213,116 +205,4 @@ fn make_simulation() -> Simulation {
         sky_model,
         camera,
     }
-}
-
-fn sensor_to_global(
-    ray_image: &RayImage<SensorFrame>,
-    zenith_coord: &Coordinate<CameraFrd>,
-) -> RayImage<GlobalFrame> {
-    let pixels: Vec<_> = ray_image
-        .ray_pixels()
-        .filter_map(|ray| ray.as_ref())
-        .cloned()
-        .map(|ray| ray.into_global_frame(zenith_coord.clone()))
-        .collect();
-
-    RayImage::from_pixels(pixels)
-}
-
-fn write_image<P: AsRef<Path>>(
-    path: P,
-    bytes: &Vec<u8>,
-    cols: u32,
-    rows: u32,
-) -> Result<(), Box<dyn Error + 'static>> {
-    image::save_buffer(&path, &bytes, cols, rows, image::ExtendedColorType::Rgb8)?;
-    Ok(())
-}
-
-fn rays_to_bytes<F: RayFrame>(ray_image: &RayImage<F>) -> (Vec<u8>, Vec<u8>) {
-    // Map the AoP values in the RayImage to RGB colours.
-    // Draw missing pixels as white.
-    let aop_image: Vec<u8> = ray_image
-        .ray_pixels()
-        .flat_map(|pixel| match pixel {
-            Some(ray) => to_rgb(ray.aop().angle().get::<degree>(), -90.0, 90.0)
-                .expect("aop in between -90 and 90"),
-            None => [255, 255, 255],
-        })
-        .collect();
-
-    // Map the DoP values in the RayImage to RGB colours.
-    // Draw missing pixels as white.
-    let dop_image: Vec<u8> = ray_image
-        .ray_pixels()
-        .flat_map(|pixel| match pixel {
-            Some(ray) => to_rgb(ray.dop().into_inner(), 0.0, 1.0).expect("dop in between 0 and 1"),
-            None => [255, 255, 255],
-        })
-        .collect();
-
-    (aop_image, dop_image)
-}
-
-// Map an f64 on the interval [x_min, x_max] to an RGB color.
-pub fn to_rgb(x: f64, x_min: f64, x_max: f64) -> Option<[u8; 3]> {
-    if x < x_min || x > x_max {
-        return None;
-    }
-
-    let interval_width = x_max - x_min;
-    let x_norm = ((x - x_min) / interval_width * 255.).floor() as u8;
-
-    let r = vec![
-        255,
-        x_norm
-            .checked_sub(96)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-        255 - x_norm
-            .checked_sub(224)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-    ]
-    .into_iter()
-    .min()
-    .unwrap();
-
-    let g = vec![
-        255,
-        x_norm
-            .checked_sub(32)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-        255 - x_norm
-            .checked_sub(160)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-    ]
-    .into_iter()
-    .min()
-    .unwrap();
-
-    let b = vec![
-        255,
-        x_norm
-            .checked_add(127)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-        255 - x_norm
-            .checked_sub(96)
-            .unwrap_or(u8::MIN)
-            .checked_mul(4)
-            .unwrap_or(u8::MAX),
-    ]
-    .into_iter()
-    .min()
-    .unwrap();
-
-    Some([r, g, b])
 }
