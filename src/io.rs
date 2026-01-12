@@ -12,97 +12,63 @@ use rumpus::{
     iter::RayIterator,
     ray::SensorFrame,
 };
-use sguaba::{engineering::Orientation, system};
+use sguaba::{engineering::Orientation, system, systems::Wgs84};
 use uom::si::{
     angle::degree,
     f64::{Angle, Length},
+    length::meter,
 };
 
 system!(pub struct InsEnu using ENU);
 
-pub struct DatasetReader {
-    ins_headers: csv::StringRecord,
-    ins_reader: csv::Reader<File>,
+pub struct InsReader;
+pub struct InsFrame {
+    pub position: Wgs84,
+    pub orientation: Orientation<InsEnu>,
 }
 
-impl DatasetReader {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn Error + 'static>> {
-        let ins_topic_path = "";
-        let mut ins_reader = csv::Reader::from_path(&ins_topic_path)?;
-        let ins_headers = ins_reader.headers()?.clone();
-        Ok(DatasetReader {
-            ins_headers,
-            ins_reader,
-        })
+impl InsReader {
+    pub fn new() -> Self {
+        Self
     }
 
-    pub fn read_frame<'a>(&'a mut self) -> Option<Result<Frame<'a>, Box<dyn Error + 'static>>> {
-        let mut valid = false;
+    pub fn read_csv<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<Box<dyn Iterator<Item = InsFrame>>, Box<dyn Error + 'static>> {
+        let mut reader = csv::Reader::from_path(path)?;
+        let mut frames = Vec::new();
+        for result in reader.records() {
+            let record = result?;
 
-        let mut ins_record = csv::StringRecord::new();
-        valid = match self.ins_reader.read_record(&mut ins_record) {
-            // Is true if we just read a valid record.
-            Ok(valid) => valid,
-            Err(err) => return Some(Err(err.into())),
-        };
+            let latitude = Angle::new::<degree>(record.get(13).unwrap().parse()?);
+            let longitude = Angle::new::<degree>(record.get(14).unwrap().parse()?);
+            let height = Length::new::<meter>(record.get(15).unwrap().parse()?);
 
-        if !valid {
-            return None;
+            let roll = Angle::new::<degree>(record.get(19).unwrap().parse()?);
+            let pitch = Angle::new::<degree>(record.get(20).unwrap().parse()?);
+            let azimuth = Angle::new::<degree>(record.get(21).unwrap().parse()?);
+
+            let position = Wgs84::builder()
+                .latitude(latitude)
+                .unwrap()
+                .longitude(longitude)
+                .altitude(height)
+                .build();
+
+            let orientation = Orientation::<InsEnu>::tait_bryan_builder()
+                .yaw(azimuth)
+                .pitch(pitch)
+                .roll(roll)
+                .build();
+
+            frames.push(InsFrame {
+                position,
+                orientation,
+            });
         }
 
-        let ins_record = Record::from_strings(&self.ins_headers, &ins_record);
-        let frame = Frame::new(ins_record);
-        Some(Ok(frame))
-    }
-}
-
-pub struct Record<'a> {
-    inner: HashMap<&'a str, String>,
-}
-
-impl<'a> Record<'a> {
-    fn from_strings(headers: &'a csv::StringRecord, record: &csv::StringRecord) -> Record<'a> {
-        assert_eq!(headers.len(), record.len());
-
-        let mut inner = HashMap::new();
-        for (header, data) in headers.iter().zip(record.into_iter()) {
-            let old = inner.insert(header, data.to_string());
-            assert_eq!(old, None);
-        }
-
-        Self { inner }
-    }
-}
-
-impl<'a> Deref for Record<'a> {
-    type Target = HashMap<&'a str, String>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<'a> DerefMut for Record<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-pub struct Frame<'a> {
-    ins_record: Record<'a>,
-}
-
-impl<'a> Frame<'a> {
-    fn new(ins_record: Record<'a>) -> Self {
-        Self { ins_record }
-    }
-
-    pub fn ins_orientation(&self) -> Orientation<InsEnu> {
-        Orientation::<InsEnu>::tait_bryan_builder()
-            .yaw(Angle::new::<degree>(0.0))
-            .pitch(Angle::new::<degree>(0.0))
-            .roll(Angle::new::<degree>(0.0))
-            .build()
+        Ok(Box::new(frames.into_iter()))
     }
 }
 

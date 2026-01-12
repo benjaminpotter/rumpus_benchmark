@@ -8,7 +8,7 @@ use rumpus::{
     ray::{GlobalFrame, Ray},
 };
 use rumpus_benchmark::{
-    io::{DatasetReader, ImageReader},
+    io::{ImageReader, InsReader},
     utils::{rays_to_bytes, sensor_to_global, write_image},
 };
 use sguaba::{Bearing, Coordinate, engineering::Orientation, systems::Wgs84};
@@ -39,16 +39,12 @@ fn main() {
     let results_dir = PathBuf::from(&timestamp);
     std::fs::create_dir(&results_dir).unwrap();
 
-    let dataset_path = "/home/ben-work/git/secondary/polcam_dataset/2025-11-24/rmc";
-    let mut reader = DatasetReader::from_path(&dataset_path).unwrap();
+    let ins_path = "/home/ben-work/git/secondary/polcam_dataset/2025-11-24/rmc/novatel_oem7_inspva/novatel_oem7_inspva.csv";
+    let ins_reader = InsReader::new();
+    let ins_frames = ins_reader.read_csv(&ins_path).unwrap();
 
     let mut frame_count = 0;
-    while let Some(result) = reader.read_frame() {
-        let Ok(frame) = result else {
-            eprintln!("failed to read frame");
-            break;
-        };
-
+    for _frame in ins_frames {
         let sim = make_simulation();
         let result = sim.simulate();
 
