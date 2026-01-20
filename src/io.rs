@@ -1,25 +1,52 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fs::File,
-    ops::{Deref, DerefMut},
-    path::Path,
-};
-
-use csv::Reader;
+use crate::systems::InsEnu;
+use chrono::{DateTime, TimeZone, Utc};
 use rumpus::{
     image::{ImageSensor, IntensityImage, RayImage},
     iter::RayIterator,
     ray::SensorFrame,
 };
-use sguaba::{engineering::Orientation, system, systems::Wgs84};
-use uom::si::{
-    angle::degree,
-    f64::{Angle, Length},
-    length::meter,
-};
+use sguaba::{engineering::Orientation, systems::Wgs84};
+use std::{error::Error, path::Path};
+use uom::si::f64::Length;
 
-system!(pub struct InsEnu using ENU);
+pub struct TimeReader;
+pub struct TimeFrame {
+    pub time: DateTime<Utc>,
+}
+
+impl TimeReader {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn read_csv<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<Box<dyn Iterator<Item = TimeFrame>>, Box<dyn Error + 'static>> {
+        let mut reader = csv::Reader::from_path(path)?;
+        let mut frames = Vec::new();
+        for result in reader.records() {
+            let record = result?;
+
+            let start_idx = 17;
+            let year: i32 = record.get(start_idx + 0).unwrap().parse()?;
+            assert_eq!(year, 2025);
+            let month: u32 = record.get(start_idx + 1).unwrap().parse()?;
+            let day: u32 = record.get(start_idx + 2).unwrap().parse()?;
+            let hour: u32 = record.get(start_idx + 3).unwrap().parse()?;
+            let min: u32 = record.get(start_idx + 4).unwrap().parse()?;
+            let msec: u32 = record.get(start_idx + 5).unwrap().parse()?;
+            let sec = msec / 1000;
+
+            let time = Utc
+                .with_ymd_and_hms(year, month, day, hour, min, sec)
+                .unwrap();
+            frames.push(TimeFrame { time });
+        }
+
+        Ok(Box::new(frames.into_iter()))
+    }
+}
 
 pub struct InsReader;
 pub struct InsFrame {
@@ -41,26 +68,15 @@ impl InsReader {
         for result in reader.records() {
             let record = result?;
 
-            let latitude = Angle::new::<degree>(record.get(13).unwrap().parse()?);
-            let longitude = Angle::new::<degree>(record.get(14).unwrap().parse()?);
-            let height = Length::new::<meter>(record.get(15).unwrap().parse()?);
+            let lat = record.get(13).unwrap().parse()?;
+            let lon = record.get(14).unwrap().parse()?;
+            let height = record.get(15).unwrap().parse()?;
+            let position = InsEnu::position_from_inspva(lat, lon, height);
 
-            let roll = Angle::new::<degree>(record.get(19).unwrap().parse()?);
-            let pitch = Angle::new::<degree>(record.get(20).unwrap().parse()?);
-            let azimuth = Angle::new::<degree>(record.get(21).unwrap().parse()?);
-
-            let position = Wgs84::builder()
-                .latitude(latitude)
-                .unwrap()
-                .longitude(longitude)
-                .altitude(height)
-                .build();
-
-            let orientation = Orientation::<InsEnu>::tait_bryan_builder()
-                .yaw(azimuth)
-                .pitch(pitch)
-                .roll(roll)
-                .build();
+            let roll = record.get(19).unwrap().parse()?;
+            let pitch = record.get(20).unwrap().parse()?;
+            let azimuth = record.get(21).unwrap().parse()?;
+            let orientation = InsEnu::orientation_from_inspva(azimuth, pitch, roll);
 
             frames.push(InsFrame {
                 position,

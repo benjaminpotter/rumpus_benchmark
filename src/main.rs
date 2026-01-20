@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local, Utc};
+use clap::Parser;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rumpus::{
     CameraEnu, CameraFrd,
@@ -8,11 +9,17 @@ use rumpus::{
     ray::{GlobalFrame, Ray},
 };
 use rumpus_benchmark::{
-    io::{ImageReader, InsReader},
+    io::{ImageReader, InsReader, TimeReader},
+    systems::{self, CamXyz, CarXyz, InsEnu},
     utils::{rays_to_bytes, sensor_to_global, write_image},
 };
-use sguaba::{Bearing, Coordinate, engineering::Orientation, systems::Wgs84};
-use std::path::PathBuf;
+use sguaba::{
+    Bearing, Coordinate, coordinate,
+    engineering::{Orientation, Pose},
+    system,
+    systems::{EquivalentTo, Wgs84},
+};
+use std::path::{Path, PathBuf};
 use uom::{
     ConstZero,
     si::{
@@ -22,50 +29,78 @@ use uom::{
     },
 };
 
+system!(pub struct CarFrd using FRD);
+
 const FOCAL_LENGTH_MM: f64 = 8.0;
 
-struct Config {
+#[derive(Parser)]
+struct Cli {
+    dataset_path: PathBuf,
+
+    #[arg(short, long)]
     max_frames: Option<usize>,
+
+    #[arg(short, long)]
     write_images: bool,
+
+    #[arg(short, long, default_value_t = 1)]
+    step: usize,
+}
+
+impl Cli {
+    fn image_dir(&self) -> PathBuf {
+        self.dataset_path.join("camera_driver_gv_vis_image_raw")
+    }
+
+    fn ins_path(&self) -> PathBuf {
+        self.dataset_path
+            .join("novatel_oem7_inspva/novatel_oem7_inspva.csv")
+    }
+
+    fn time_path(&self) -> PathBuf {
+        self.dataset_path
+            .join("novatel_oem7_time/novatel_oem7_time.csv")
+    }
 }
 
 fn main() {
-    let config = Config {
-        write_images: true,
-        max_frames: Some(1),
-    };
-
+    let config = Cli::parse();
     let timestamp = Local::now().to_rfc3339();
     let results_dir = PathBuf::from(&timestamp);
     std::fs::create_dir(&results_dir).unwrap();
 
-    let ins_path = "/home/ben-work/git/secondary/polcam_dataset/2025-11-24/rmc/novatel_oem7_inspva/novatel_oem7_inspva.csv";
+    let cam_in_car = systems::cam_to_car().transform(Orientation::<CamXyz>::aligned());
+    let ins_path = config.ins_path();
     let ins_reader = InsReader::new();
     let ins_frames = ins_reader.read_csv(&ins_path).unwrap();
 
+    let time_path = config.time_path();
+    let time_reader = TimeReader::new();
+    let time_frames = time_reader.read_csv(&time_path).unwrap();
+
+    // TODO: Is this the right focal length?
+    let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
+    let lens = Lens::from_focal_length(focal_length).expect("focal length is greater than zero");
+    // TODO: Is this the right pixel size?
+    let pixel_size = Length::new::<micron>(3.45);
+    let image_reader = ImageReader::new(pixel_size);
+
     let mut frame_count = 0;
-    for _frame in ins_frames {
-        let sim = make_simulation();
+    for (i, (time_frame, ins_frame)) in time_frames.zip(ins_frames).enumerate().step_by(config.step)
+    {
+        let car_in_ins_enu = ins_frame.orientation;
+        let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
+        let sim = make_simulation(
+            ins_frame.position,
+            cam_in_ins_enu.cast().orientation(),
+            time_frame.time,
+        );
         let result = sim.simulate();
 
-        // Define required parameters.
-        let input_path = "../rumpus/testing/intensity.png";
-        // TODO: Is this the right pixel size?
-        let pixel_size = Length::new::<micron>(3.45);
-        let image_reader = ImageReader::new(pixel_size);
+        let image_path = config.image_dir().join(image_path_from_frame(i));
+        let image = image_reader.read_image(image_path).unwrap();
 
-        // TODO: Convert to global frame.
-        let image = image_reader.read_image(input_path).unwrap();
-        // TODO: Is this the right focal length?
-        let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
-        let lens =
-            Lens::from_focal_length(focal_length).expect("focal length is greater than zero");
-        let orientation = Orientation::<CameraEnu>::tait_bryan_builder()
-            .yaw(Angle::new::<degree>(0.0))
-            .pitch(Angle::new::<degree>(0.0))
-            .roll(Angle::new::<degree>(0.0))
-            .build();
-        let cam = Camera::new(lens, orientation);
+        let cam = Camera::new(lens, cam_in_ins_enu.cast().orientation());
         let zenith_coord = cam
             .trace_from_sky(
                 Bearing::<CameraEnu>::builder()
@@ -77,41 +112,34 @@ fn main() {
             .expect("zenith is always above the horizon");
         let ray_image = sensor_to_global(&image, &zenith_coord);
 
-        // Print the ground truth position
-        // Highlight if its tilted
-        // For aop and dop:
-        // Print the rms error
-        // Print the standard error
-        // Could do rms error when low dop are excluded
-        // Create new directory with results
-        // Name directory using timestamp
-        // Write out all four images
-
         if config.write_images {
             for (prefix, ray_image) in [("simulated", result.ray_image()), ("measured", &ray_image)]
             {
                 let (aop_image, dop_image) = rays_to_bytes(ray_image);
 
-                let filename = format!("{}_aop.png", prefix);
+                let filename = format!("{prefix}_aop_{i:04}.png");
                 let mut path = results_dir.clone();
                 path.push(&filename);
                 write_image(path, &aop_image, 1224, 1024).unwrap();
 
-                let filename = format!("{}_dop.png", prefix);
+                let filename = format!("{prefix}_dop_{i:04}.png");
                 let mut path = results_dir.clone();
                 path.push(&filename);
                 write_image(path, &dop_image, 1224, 1024).unwrap();
             }
         }
 
+        frame_count += 1;
         if let Some(max_frames) = config.max_frames
             && frame_count >= max_frames
         {
             break;
         }
-
-        frame_count += 1;
     }
+}
+
+fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {
+    format!("camera_driver_gv_vis_image_raw_{:04}.png", frame_index)
 }
 
 struct Simulation {
@@ -157,7 +185,11 @@ impl SimulationResult {
     }
 }
 
-fn make_simulation() -> Simulation {
+fn make_simulation(
+    position: Wgs84,
+    orientation: Orientation<CameraEnu>,
+    time: DateTime<Utc>,
+) -> Simulation {
     // TODO: Is this the right pixel_size?
     let pixel_size = Length::new::<micron>(3.45 * 2.);
     let image_rows = 1024;
@@ -165,14 +197,6 @@ fn make_simulation() -> Simulation {
     // Use a small focal length to see more of the sky.
     // TODO: Is this the right focal length?
     let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
-    let latitude = Angle::new::<degree>(44.2187);
-    let longitude = Angle::new::<degree>(-76.4747);
-    let time = "2025-06-13T16:26:47+00:00";
-    let orientation = Orientation::<CameraEnu>::tait_bryan_builder()
-        .yaw(Angle::new::<degree>(0.0))
-        .pitch(Angle::new::<degree>(0.0))
-        .roll(Angle::new::<degree>(0.0))
-        .build();
 
     let lens = Lens::from_focal_length(focal_length).expect("focal length is greater than zero");
     let image_sensor = ImageSensor::new(pixel_size, pixel_size, image_rows, image_cols);
@@ -181,17 +205,7 @@ fn make_simulation() -> Simulation {
         .map(|(row, col)| image_sensor.at_pixel(row, col).unwrap())
         .collect();
 
-    let sky_model = SkyModel::from_wgs84_and_time(
-        Wgs84::builder()
-            .latitude(latitude)
-            .expect("latitude is between -90 and 90")
-            .longitude(longitude)
-            .altitude(Length::ZERO)
-            .build(),
-        time.parse::<DateTime<Utc>>()
-            .expect("valid datetime string"),
-    );
-
+    let sky_model = SkyModel::from_wgs84_and_time(position, time);
     let camera = Camera::new(lens.clone(), orientation);
 
     Simulation {
