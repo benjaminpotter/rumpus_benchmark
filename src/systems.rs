@@ -3,7 +3,7 @@ use sguaba::{
     engineering::Orientation,
     math::RigidBodyTransform,
     system,
-    systems::{Ecef, EquivalentTo, Wgs84},
+    systems::{Ecef, Wgs84},
 };
 use uom::{
     ConstZero,

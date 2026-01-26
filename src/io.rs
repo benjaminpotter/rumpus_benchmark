@@ -6,7 +6,6 @@ use rumpus::{
 };
 use sguaba::{engineering::Orientation, systems::Wgs84};
 use std::{error::Error, path::Path};
-use uom::si::f64::Length;
 
 pub struct TimeReader;
 pub struct TimeFrame {
@@ -87,14 +86,11 @@ impl InsReader {
     }
 }
 
-pub struct ImageReader {
-    pixel_size: Length,
-}
-pub struct ImageFrame {}
+pub struct ImageReader;
 
 impl ImageReader {
-    pub fn new(pixel_size: Length) -> Self {
-        Self { pixel_size }
+    pub fn new() -> Self {
+        Self
     }
 
     pub fn read_image<P: AsRef<Path>>(

@@ -10,7 +10,7 @@ use rumpus_benchmark::{
     systems::{self, CamXyz},
     utils::sensor_to_global,
 };
-use sguaba::{Vector, builder::vector, engineering::Orientation};
+use sguaba::engineering::Orientation;
 use std::path::{Path, PathBuf};
 use uom::si::{
     angle::degree,
@@ -74,7 +74,7 @@ fn main() {
 
     let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
     let pixel_size = Length::new::<micron>(3.45);
-    let image_reader = ImageReader::new(pixel_size);
+    let image_reader = ImageReader::new();
     let camera = Camera::new(
         PinholeOptic::from_focal_length(focal_length),
         pixel_size * 2.0,
