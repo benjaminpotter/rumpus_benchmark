@@ -1,8 +1,7 @@
 use crate::systems::InsEnu;
 use chrono::{DateTime, TimeZone, Utc};
 use rumpus::{
-    image::{ImageSensor, IntensityImage, RayImage},
-    iter::RayIterator,
+    image::{IntensityImage, RayImage},
     ray::SensorFrame,
 };
 use sguaba::{engineering::Orientation, systems::Wgs84};
@@ -108,22 +107,13 @@ impl ImageReader {
         // Create a new IntensityImage from the input image.
         let (width, height) = raw_image.dimensions();
         let intensity_image =
-            IntensityImage::from_bytes(width as u16, height as u16, &raw_image.into_raw())
+            IntensityImage::from_bytes(width as usize, height as usize, &raw_image.into_raw())
                 .expect("image dimensions are even");
 
-        // Filter the rays from the intensity image by DoP.
-        // Convert the sparse RayIterator into a dense RayImage using the specs of
-        // the image sensor as a RaySensor.
-        let ray_image: RayImage<SensorFrame> = intensity_image
-            .rays(self.pixel_size, self.pixel_size)
-            .ray_image(&ImageSensor::new(
-                self.pixel_size,
-                self.pixel_size,
-                intensity_image.height(),
-                intensity_image.width(),
-            ))
-            .expect("no ray hits the same pixel");
-
-        Ok(ray_image)
+        Ok(RayImage::from_rays(
+            intensity_image.rays().map(|ray| Some(ray)),
+            intensity_image.height(),
+            intensity_image.width(),
+        )?)
     }
 }

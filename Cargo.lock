@@ -1186,8 +1186,8 @@ checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
 
 [[package]]
 name = "rumpus"
-version = "0.4.0"
-source = "git+https://github.com/benjaminpotter/rumpus.git?tag=0.4.0#bd05320a39aa37306c30cc229f85439c0fc70e1a"
+version = "0.3.0"
+source = "git+https://github.com/benjaminpotter/rumpus.git?tag=rumpus_benchmark#01ed254f8aa32e356340da78ebe54925c36c002d"
 dependencies = [
  "chrono",
  "nalgebra 0.33.2",
@@ -1195,6 +1195,7 @@ dependencies = [
  "rayon",
  "sguaba",
  "spa",
+ "thiserror 2.0.17",
  "uom",
 ]
 
@@ -1208,6 +1209,7 @@ dependencies = [
  "image",
  "rayon",
  "rumpus",
+ "serde",
  "sguaba",
  "uom",
 ]

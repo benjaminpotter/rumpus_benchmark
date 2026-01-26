@@ -1,10 +1,9 @@
-use rumpus::CameraEnu;
 use sguaba::{
     Vector,
-    engineering::{Orientation, Pose},
+    engineering::Orientation,
     math::RigidBodyTransform,
     system,
-    systems::{EquivalentTo, Wgs84},
+    systems::{Ecef, EquivalentTo, Wgs84},
 };
 use uom::{
     ConstZero,
@@ -25,10 +24,6 @@ system!(pub struct CarXyz using right-handed XYZ);
 
 // The earth bounded frame provided by the INS.
 system!(pub struct InsEnu using ENU);
-
-// The InsEnu frame has the same axes orientation as the CameraEnu frame.
-// Their origin will be slightly different, but we ignore that here.
-unsafe impl EquivalentTo<CameraEnu> for InsEnu {}
 
 impl InsEnu {
     pub fn orientation_from_inspva(azimuth: f64, pitch: f64, roll: f64) -> Orientation<Self> {
@@ -62,10 +57,8 @@ impl InsEnu {
 
 pub fn cam_to_car() -> RigidBodyTransform<CamXyz, CarXyz> {
     let cam_aligned_to_car = Orientation::<CamXyz>::tait_bryan_builder()
-        // TODO: I am not certain this is right, I think there may be more problems in the
-        // simulation code.
         .yaw(Angle::HALF_TURN / 2.0)
-        .pitch(Angle::ZERO)
+        .pitch(Angle::HALF_TURN)
         .roll(Angle::ZERO)
         .build();
 
@@ -89,4 +82,8 @@ pub fn car_to_ins(car_in_ins: Orientation<InsEnu>) -> RigidBodyTransform<CarXyz,
     let rotation = unsafe { car_in_ins.map_as_zero_in::<CarXyz>() }.inverse();
 
     unsafe { RigidBodyTransform::new(translation, rotation) }
+}
+
+pub fn ins_to_ecef(ins_position: &Wgs84) -> RigidBodyTransform<InsEnu, Ecef> {
+    unsafe { RigidBodyTransform::ecef_to_enu_at(ins_position) }.inverse()
 }
