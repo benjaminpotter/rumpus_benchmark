@@ -1059,6 +1059,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
+name = "quickcheck_macros"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f71ee38b42f8459a88d3362be6f9b841ad2d5421844f61eb1c59c11bff3ac14a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1186,11 +1197,12 @@ checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
 
 [[package]]
 name = "rumpus"
-version = "0.3.0"
-source = "git+https://github.com/benjaminpotter/rumpus.git?tag=rumpus_benchmark#01ed254f8aa32e356340da78ebe54925c36c002d"
+version = "0.5.1"
+source = "git+https://github.com/benjaminpotter/rumpus.git?tag=0.5.1#3eccfd7d38942cbbc6d10ac009dfb935a8cb5a4c"
 dependencies = [
  "chrono",
  "nalgebra 0.33.2",
+ "quickcheck_macros",
  "rand",
  "rayon",
  "sguaba",

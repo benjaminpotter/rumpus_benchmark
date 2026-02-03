@@ -9,10 +9,10 @@ pub fn sensor_to_global(ray_image: &RayImage<SensorFrame>) -> RayImage<GlobalFra
     let rays: Vec<_> = ray_image
         .pixels()
         .map(|px| {
-            let ray = px.ray().clone()?;
+            let ray = px.ray()?;
             let shift = shift_by(px.row(), px.col(), ray_image.rows(), ray_image.cols());
             let angle = ray.aop().into_global_frame(-shift);
-            Some(Ray::<GlobalFrame>::new(angle, *ray.dop()))
+            Some(Ray::<GlobalFrame>::new(angle, ray.dop()))
         })
         .collect();
 

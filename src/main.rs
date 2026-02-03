@@ -1,7 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::Jet,
+    image::{Jet, RayImage},
     optic::{Camera, PinholeOptic},
     simulation::Simulation,
 };
@@ -13,8 +13,8 @@ use rumpus_benchmark::{
 use sguaba::engineering::Orientation;
 use std::path::{Path, PathBuf};
 use uom::si::{
-    angle::degree,
-    f64::Length,
+    angle::{degree, radian},
+    f64::{Angle, Length},
     length::{micron, millimeter},
 };
 
@@ -55,6 +55,7 @@ struct Record {
     frame_index: usize,
     car_pitch_deg: f64,
     car_roll_deg: f64,
+    weighted_rmse: f64,
 }
 
 fn main() {
@@ -92,21 +93,24 @@ fn main() {
         let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
         let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
         let simulation = Simulation::new(camera.clone(), cam_in_ecef, time_frame.time);
-        let sim_image = simulation.ray_image();
+        let simulated = simulation.par_ray_image();
 
         let image_path = config.image_dir().join(image_path_from_frame(i));
         let image = image_reader.read_image(image_path).unwrap();
-        let ray_image = sensor_to_global(&image);
+        let measured = sensor_to_global(&image);
+
+        let weighted_rmse = weighted_rmse(&simulated, &measured);
 
         let (_car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
             frame_index: frame_count,
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
+            weighted_rmse,
         });
 
         if config.write_images {
-            for (prefix, ray_image) in [("simulated", &sim_image), ("measured", &ray_image)] {
+            for (prefix, ray_image) in [("simulated", &simulated), ("measured", &measured)] {
                 let filename = format!("{prefix}_aop_{i:04}.png");
                 let path = results_dir.join(&filename);
                 let _ = image::save_buffer(
@@ -136,6 +140,29 @@ fn main() {
             break;
         }
     }
+}
+
+fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f64 {
+    let mut sum_weighted_errors = 0.0f64;
+    let mut sum_weights = 0.0f64;
+    let mut samples = 0.;
+
+    for rpx in measured.pixels() {
+        if let Some(measured_ray) = rpx.ray()
+            && let Some(simulated_ray) = simulated.ray(rpx.row(), rpx.col())
+        {
+            let weight = measured_ray.dop();
+            let error = Angle::from(measured_ray.aop() - simulated_ray.aop())
+                .get::<degree>()
+                .powf(2.);
+
+            sum_weights += weight;
+            sum_weighted_errors += weight * error;
+            samples += 1.;
+        }
+    }
+
+    (sum_weighted_errors / sum_weights / samples).sqrt()
 }
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {
