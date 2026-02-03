@@ -11,7 +11,10 @@ use rumpus_benchmark::{
     utils::sensor_to_global,
 };
 use sguaba::engineering::Orientation;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Instant,
+};
 use uom::si::{
     angle::{degree, radian},
     f64::{Angle, Length},
@@ -89,6 +92,8 @@ fn main() {
     let mut frame_count = 0;
     for (i, (time_frame, ins_frame)) in time_frames.zip(ins_frames).enumerate().step_by(config.step)
     {
+        let t0 = Instant::now();
+
         let car_in_ins_enu = ins_frame.orientation;
         let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
         let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
@@ -103,7 +108,7 @@ fn main() {
 
         let (_car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
-            frame_index: frame_count,
+            frame_index: i,
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
             weighted_rmse,
@@ -131,6 +136,21 @@ fn main() {
                     image::ExtendedColorType::Rgb8,
                 );
             }
+        }
+
+        match config.max_frames {
+            Some(max_frames) => println!(
+                "[{:04}/{:04}] frame {:04} in {:05} ms",
+                frame_count + 1,
+                max_frames,
+                i,
+                t0.elapsed().as_millis()
+            ),
+            None => println!(
+                "[{:04}/????] in {:05} ms",
+                frame_count + 1,
+                t0.elapsed().as_millis()
+            ),
         }
 
         frame_count += 1;
