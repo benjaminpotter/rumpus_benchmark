@@ -1,6 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
+    estimate::pattern_match::Matcher,
     image::{Jet, RayImage},
     optic::{Camera, PinholeOptic},
     simulation::Simulation,
@@ -58,27 +59,35 @@ struct Record {
     frame_index: usize,
     car_pitch_deg: f64,
     car_roll_deg: f64,
-    weighted_rmse: f64,
 }
 
 fn main() {
     let config = Cli::parse();
+
+    // Make a new directory to hold results.
     let timestamp = Local::now().to_rfc3339();
     let results_dir = PathBuf::from(&timestamp);
     std::fs::create_dir(&results_dir).unwrap();
 
-    let cam_in_car = systems::cam_to_car().transform(Orientation::<CamXyz>::aligned());
+    // Setup reader for INS position and orientation measurements.
     let ins_path = config.ins_path();
     let ins_reader = InsReader::new();
     let ins_frames = ins_reader.read_csv(&ins_path).unwrap();
 
+    // Define orientation of the camera in the car frame.
+    let cam_in_car = systems::cam_to_car().transform(Orientation::<CamXyz>::aligned());
+
+    // Setup reader for INS time measurements.
     let time_path = config.time_path();
     let time_reader = TimeReader::new();
     let time_frames = time_reader.read_csv(&time_path).unwrap();
 
+    // Setup reader for polarization images.
+    let image_reader = ImageReader::new();
+
+    // Setup camera model.
     let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
     let pixel_size = Length::new::<micron>(3.45);
-    let image_reader = ImageReader::new();
     let camera = Camera::new(
         PinholeOptic::from_focal_length(focal_length),
         pixel_size * 2.0,
@@ -86,6 +95,9 @@ fn main() {
         1224,
     );
 
+    let matcher = Matcher::new();
+
+    // Open a new CSV file to store results.
     let csv_path = results_dir.join("results.csv");
     let mut writer = csv::Writer::from_path(csv_path).unwrap();
 
@@ -94,49 +106,29 @@ fn main() {
     {
         let t0 = Instant::now();
 
+        // Figure out the orientation of the camera in the ECEF frame.
         let car_in_ins_enu = ins_frame.orientation;
         let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
         let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
-        let simulation = Simulation::new(camera.clone(), cam_in_ecef, time_frame.time);
-        let simulated = simulation.par_ray_image();
 
+        // Read the polarization image from this frame.
         let image_path = config.image_dir().join(image_path_from_frame(i));
         let image = image_reader.read_image(image_path).unwrap();
-        let measured = sensor_to_global(&image);
 
-        let weighted_rmse = weighted_rmse(&simulated, &measured);
+        let estimated_orientation =
+            matcher.orientation_of(image, cam_in_ecef.position(), time_frame.time);
 
+        // Simulate an image for this timestep.
+        // let simulation = Simulation::new(camera.clone(), cam_in_ecef, time_frame.time);
+        // let simulated = simulation.par_ray_image();
+
+        // Write results from this frame to the CSV file.
         let (_car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
             frame_index: i,
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
-            weighted_rmse,
         });
-
-        if config.write_images {
-            for (prefix, ray_image) in [("simulated", &simulated), ("measured", &measured)] {
-                let filename = format!("{prefix}_aop_{i:04}.png");
-                let path = results_dir.join(&filename);
-                let _ = image::save_buffer(
-                    path,
-                    &ray_image.aop_bytes(&Jet),
-                    1224,
-                    1024,
-                    image::ExtendedColorType::Rgb8,
-                );
-
-                let filename = format!("{prefix}_dop_{i:04}.png");
-                let path = results_dir.join(&filename);
-                let _ = image::save_buffer(
-                    path,
-                    &ray_image.dop_bytes(&Jet),
-                    1224,
-                    1024,
-                    image::ExtendedColorType::Rgb8,
-                );
-            }
-        }
 
         match config.max_frames {
             Some(max_frames) => println!(
@@ -160,29 +152,6 @@ fn main() {
             break;
         }
     }
-}
-
-fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f64 {
-    let mut sum_weighted_errors = 0.0f64;
-    let mut sum_weights = 0.0f64;
-    let mut samples = 0.;
-
-    for rpx in measured.pixels() {
-        if let Some(measured_ray) = rpx.ray()
-            && let Some(simulated_ray) = simulated.ray(rpx.row(), rpx.col())
-        {
-            let weight = measured_ray.dop();
-            let error = Angle::from(measured_ray.aop() - simulated_ray.aop())
-                .get::<degree>()
-                .powf(2.);
-
-            sum_weights += weight;
-            sum_weighted_errors += weight * error;
-            samples += 1.;
-        }
-    }
-
-    (sum_weighted_errors / sum_weights / samples).sqrt()
 }
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {

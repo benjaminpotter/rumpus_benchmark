@@ -1198,7 +1198,6 @@ checksum = "0c6a884d2998352bb4daf0183589aec883f16a6da1f4dde84d8e2e9a5409a1ce"
 [[package]]
 name = "rumpus"
 version = "0.5.1"
-source = "git+https://github.com/benjaminpotter/rumpus.git?tag=0.5.1#3eccfd7d38942cbbc6d10ac009dfb935a8cb5a4c"
 dependencies = [
  "chrono",
  "nalgebra 0.33.2",
