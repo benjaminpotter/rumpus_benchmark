@@ -10,7 +10,7 @@ use rumpus_benchmark::{
     systems::{self, CamXyz, up_in_cam},
     utils::sensor_to_global,
 };
-use sguaba::{Bearing, bearing, engineering::Orientation};
+use sguaba::engineering::Orientation;
 use std::{
     path::{Path, PathBuf},
     time::Instant,
@@ -23,6 +23,7 @@ use uom::si::{
 
 const FOCAL_LENGTH_MM: f64 = 8.0;
 
+#[allow(clippy::similar_names)]
 fn main() {
     let config = Cli::parse();
     let timestamp = Local::now().to_rfc3339();
@@ -59,7 +60,7 @@ fn main() {
         let car_in_ins_enu = ins_frame.orientation;
         let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
         let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
-        let simulation = Simulation::new(camera.clone(), cam_in_ecef, time_frame.time);
+        let simulation = Simulation::new(camera, cam_in_ecef, time_frame.time);
         let simulated = simulation.par_ray_image();
 
         let up = up_in_cam(car_in_ins_enu).normalized();

@@ -1,9 +1,9 @@
 use sguaba::{
-    Vector, bearing,
+    Vector,
     engineering::Orientation,
     math::RigidBodyTransform,
     system,
-    systems::{BearingDefined, Ecef, Wgs84},
+    systems::{Ecef, Wgs84},
     vector,
 };
 use uom::{
