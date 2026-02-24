@@ -8,7 +8,7 @@ use rumpus::{
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
     systems::{self, CamXyz, up_in_cam},
-    utils::sensor_to_global,
+    utils::{sensor_to_global, weighted_rmse},
 };
 use sguaba::engineering::Orientation;
 use std::{
@@ -135,29 +135,6 @@ fn main() {
             break;
         }
     }
-}
-
-fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f64 {
-    let mut sum_weighted_errors = 0.0f64;
-    let mut sum_weights = 0.0f64;
-    let mut samples = 0.;
-
-    for rpx in measured.pixels() {
-        if let Some(measured_ray) = rpx.ray()
-            && let Some(simulated_ray) = simulated.ray(rpx.row(), rpx.col())
-        {
-            let weight = measured_ray.dop();
-            let error = Angle::from(measured_ray.aop() - simulated_ray.aop())
-                .get::<degree>()
-                .powf(2.);
-
-            sum_weights += weight;
-            sum_weighted_errors += weight * error;
-            samples += 1.;
-        }
-    }
-
-    (sum_weighted_errors / sum_weights / samples).sqrt()
 }
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {

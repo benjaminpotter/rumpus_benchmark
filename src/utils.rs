@@ -3,7 +3,33 @@ use rumpus::{
     optic::PixelCoordinate,
     ray::{GlobalFrame, Ray, SensorFrame},
 };
-use uom::si::{angle::radian, f64::Angle};
+use uom::si::{
+    angle::{degree, radian},
+    f64::Angle,
+};
+
+pub fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f64 {
+    let mut sum_weighted_errors = 0.0f64;
+    let mut sum_weights = 0.0f64;
+    let mut samples = 0.;
+
+    for rpx in measured.pixels() {
+        if let Some(measured_ray) = rpx.ray()
+            && let Some(simulated_ray) = simulated.ray(rpx.row(), rpx.col())
+        {
+            let weight = measured_ray.dop();
+            let error = Angle::from(measured_ray.aop() - simulated_ray.aop())
+                .get::<degree>()
+                .powf(2.);
+
+            sum_weights += weight;
+            sum_weighted_errors += weight * error;
+            samples += 1.;
+        }
+    }
+
+    (sum_weighted_errors / sum_weights / samples).sqrt()
+}
 
 /// Shifts the ray_image ignoring any tilt!
 pub fn sensor_to_global(
