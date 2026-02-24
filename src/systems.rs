@@ -1,9 +1,10 @@
 use sguaba::{
-    Vector,
+    Vector, bearing,
     engineering::Orientation,
     math::RigidBodyTransform,
     system,
-    systems::{Ecef, Wgs84},
+    systems::{BearingDefined, Ecef, Wgs84},
+    vector,
 };
 use uom::{
     ConstZero,
@@ -86,4 +87,13 @@ pub fn car_to_ins(car_in_ins: Orientation<InsEnu>) -> RigidBodyTransform<CarXyz,
 
 pub fn ins_to_ecef(ins_position: &Wgs84) -> RigidBodyTransform<InsEnu, Ecef> {
     unsafe { RigidBodyTransform::ecef_to_enu_at(ins_position) }.inverse()
+}
+
+#[allow(clippy::similar_names)]
+pub fn up_in_cam(car_in_ins: Orientation<InsEnu>) -> Vector<CamXyz> {
+    let up_ins_enu =
+        vector!(e = Length::ZERO, n = Length::ZERO, u = Length::new::<meter>(1.); in InsEnu);
+    let up_car_xyz = car_to_ins(car_in_ins).inverse_transform(up_ins_enu);
+
+    cam_to_car().inverse_transform(up_car_xyz)
 }

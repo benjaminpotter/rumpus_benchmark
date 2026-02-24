@@ -2,15 +2,15 @@ use chrono::Local;
 use clap::Parser;
 use rumpus::{
     image::{Jet, RayImage},
-    optic::{Camera, PinholeOptic},
+    optic::{Camera, PinholeOptic, RayDirection},
     simulation::Simulation,
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
-    systems::{self, CamXyz},
+    systems::{self, CamXyz, up_in_cam},
     utils::sensor_to_global,
 };
-use sguaba::engineering::Orientation;
+use sguaba::{Bearing, bearing, engineering::Orientation};
 use std::{
     path::{Path, PathBuf},
     time::Instant,
@@ -22,44 +22,6 @@ use uom::si::{
 };
 
 const FOCAL_LENGTH_MM: f64 = 8.0;
-
-#[derive(Parser)]
-struct Cli {
-    dataset_path: PathBuf,
-
-    #[arg(short, long)]
-    max_frames: Option<usize>,
-
-    #[arg(short, long)]
-    write_images: bool,
-
-    #[arg(short, long, default_value_t = 1)]
-    step: usize,
-}
-
-impl Cli {
-    fn image_dir(&self) -> PathBuf {
-        self.dataset_path.join("camera_driver_gv_vis_image_raw")
-    }
-
-    fn ins_path(&self) -> PathBuf {
-        self.dataset_path
-            .join("novatel_oem7_inspva/novatel_oem7_inspva.csv")
-    }
-
-    fn time_path(&self) -> PathBuf {
-        self.dataset_path
-            .join("novatel_oem7_time/novatel_oem7_time.csv")
-    }
-}
-
-#[derive(serde::Serialize)]
-struct Record {
-    frame_index: usize,
-    car_pitch_deg: f64,
-    car_roll_deg: f64,
-    weighted_rmse: f64,
-}
 
 fn main() {
     let config = Cli::parse();
@@ -100,15 +62,27 @@ fn main() {
         let simulation = Simulation::new(camera.clone(), cam_in_ecef, time_frame.time);
         let simulated = simulation.par_ray_image();
 
+        let up = up_in_cam(car_in_ins_enu).normalized();
+        let azimuth = up.y().atan2(up.x());
+        // HACK: I do not know why the trait bounds for ...z().acos(); are violated...
+        let polar = Angle::new::<radian>(up.z().value.acos());
+        let ray_direction = RayDirection::from_angles(polar, azimuth);
+        let Some(up_pixel) = camera.trace_from_bearing(ray_direction) else {
+            println!("global zenith is outside of camera fov! skipping...");
+            continue;
+        };
+
         let image_path = config.image_dir().join(image_path_from_frame(i));
         let image = image_reader.read_image(image_path).unwrap();
-        let measured = sensor_to_global(&image);
+        let measured = sensor_to_global(&image, &up_pixel);
 
         let weighted_rmse = weighted_rmse(&simulated, &measured);
 
         let (_car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
             frame_index: i,
+            origin_row: up_pixel.row(),
+            origin_col: up_pixel.col(),
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
             weighted_rmse,
@@ -187,4 +161,44 @@ fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f6
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {
     format!("camera_driver_gv_vis_image_raw_{:04}.png", frame_index)
+}
+
+#[derive(Parser)]
+struct Cli {
+    dataset_path: PathBuf,
+
+    #[arg(short, long)]
+    max_frames: Option<usize>,
+
+    #[arg(short, long)]
+    write_images: bool,
+
+    #[arg(short, long, default_value_t = 1)]
+    step: usize,
+}
+
+impl Cli {
+    fn image_dir(&self) -> PathBuf {
+        self.dataset_path.join("camera_driver_gv_vis_image_raw")
+    }
+
+    fn ins_path(&self) -> PathBuf {
+        self.dataset_path
+            .join("novatel_oem7_inspva/novatel_oem7_inspva.csv")
+    }
+
+    fn time_path(&self) -> PathBuf {
+        self.dataset_path
+            .join("novatel_oem7_time/novatel_oem7_time.csv")
+    }
+}
+
+#[derive(serde::Serialize)]
+struct Record {
+    frame_index: usize,
+    origin_row: usize,
+    origin_col: usize,
+    car_pitch_deg: f64,
+    car_roll_deg: f64,
+    weighted_rmse: f64,
 }

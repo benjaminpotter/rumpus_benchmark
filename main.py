@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from argparse import ArgumentParser
 from pathlib import Path
+from sklearn.linear_model import LinearRegression
 
 mpl.rcParams.update(
     {
@@ -43,9 +44,18 @@ def main():
     df["zenith_angle"] = np.arccos(np.cos(df["pitch"]) * np.cos(df["roll"]))
     df["zenith_angle_deg"] = np.rad2deg(df["zenith_angle"])
 
+    X = df[["zenith_angle_deg"]]
+    y = df["weighted_rmse"]
+
+    model = LinearRegression()
+    model.fit(X, y)
+
+    df["weighted_rmse_pred"] = model.predict(X)
+
     fig, ax = plt.subplots(figsize=(3.3, 2.5))
 
     ax.scatter(df["zenith_angle_deg"], df["weighted_rmse"], label="Image")
+    ax.plot(df["zenith_angle_deg"], df["weighted_rmse_pred"])
     ax.set_xlabel("Zenith Angle [deg]")
     ax.set_ylabel("Weighted RMSE [deg]")
     ax.grid()
