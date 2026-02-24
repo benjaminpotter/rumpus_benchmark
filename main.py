@@ -1,13 +1,8 @@
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from argparse import ArgumentParser
 from pathlib import Path
-from sklearn.linear_model import LinearRegression
-from scipy import stats
-import plotly.graph_objects as go
-from scipy.interpolate import griddata
 
 
 def main():
@@ -19,144 +14,71 @@ def main():
     solution_df = read_results(args.PATH / "results.csv")
 
     df["candidate_yaw"] = ((df["car_yaw_deg"] + df["yaw_offset_deg"] + 180) % 360) - 180
-    df["delta_weighted_rmse"] = df["weighted_rmse"] - df.groupby("frame_index")[
-        "weighted_rmse"
-    ].transform("min")
 
-    frame_indices = sorted(df["frame_index"].unique())
+    # Pick the candidate with the smallest weighted_rmse per frame
+    best_candidates = df.loc[df.groupby("frame_index")["weighted_rmse"].idxmin()].copy()
+    best_candidates = best_candidates.sort_values("frame_index").reset_index(drop=True)
 
-    # Build one frame per frame_index
-    frames = []
-    for fi in frame_indices:
-        frame_df = df[df["frame_index"] == fi].sort_values("candidate_yaw")
-        sol_row = solution_df[solution_df["frame_index"] == fi]
-
-        traces = [
-            go.Scatter(
-                x=frame_df["candidate_yaw"],
-                y=frame_df["delta_weighted_rmse"],
-                mode="lines+markers",
-                name="Error curve",
-                line=dict(color="steelblue"),
-                marker=dict(size=3),
-            )
-        ]
-
-        # Overlay the solution yaw as a vertical line if present
-        if not sol_row.empty:
-            sol_yaw = sol_row["car_yaw_deg"].values[0]
-            traces.append(
-                go.Scatter(
-                    x=[sol_yaw, sol_yaw],
-                    y=[0, frame_df["delta_weighted_rmse"].max()],
-                    mode="lines",
-                    name="Solution yaw",
-                    line=dict(color="red", width=2, dash="dash"),
-                )
-            )
-
-        frames.append(go.Frame(data=traces, name=str(fi)))
-
-    # Initial frame data
-    init_df = df[df["frame_index"] == frame_indices[0]].sort_values("candidate_yaw")
-    init_sol = solution_df[solution_df["frame_index"] == frame_indices[0]]
-
-    init_traces = [
-        go.Scatter(
-            x=init_df["candidate_yaw"],
-            y=init_df["delta_weighted_rmse"],
-            mode="lines+markers",
-            name="Error curve",
-            line=dict(color="steelblue"),
-            marker=dict(size=3),
-        )
-    ]
-    if not init_sol.empty:
-        sol_yaw = init_sol["car_yaw_deg"].values[0]
-        init_traces.append(
-            go.Scatter(
-                x=[sol_yaw, sol_yaw],
-                y=[0, init_df["delta_weighted_rmse"].max()],
-                mode="lines",
-                name="Solution yaw",
-                line=dict(color="red", width=2, dash="dash"),
-            )
-        )
-
-    fig = go.Figure(data=init_traces, frames=frames)
-
-    # Slider steps — one per frame
-    sliders = [
-        dict(
-            active=0,
-            currentvalue=dict(prefix="Frame: ", visible=True, xanchor="center"),
-            pad=dict(t=50),
-            steps=[
-                dict(
-                    method="animate",
-                    args=[
-                        [str(fi)],
-                        dict(
-                            mode="immediate",
-                            frame=dict(duration=0, redraw=True),
-                            transition=dict(duration=0),
-                        ),
-                    ],
-                    label=str(fi),
-                )
-                for fi in frame_indices
-            ],
-        )
-    ]
-
-    y_max = df["delta_weighted_rmse"].max()
-    fig.update_layout(
-        title="Yaw vs Delta RMSE",
-        xaxis_title="Candidate Yaw (deg)",
-        yaxis_title="Delta Weighted RMSE",
-        xaxis=dict(range=[-180, 180]),
-        yaxis=dict(range=[0, y_max * 1.05]),
-        sliders=sliders,
-        updatemenus=[
-            dict(
-                type="buttons",
-                showactive=False,
-                y=0,
-                x=0.5,
-                xanchor="center",
-                yanchor="top",
-                pad=dict(t=60),
-                buttons=[
-                    dict(
-                        label="Play",
-                        method="animate",
-                        args=[
-                            None,
-                            dict(
-                                frame=dict(duration=100, redraw=True),
-                                fromcurrent=True,
-                                transition=dict(duration=0),
-                            ),
-                        ],
-                    ),
-                    dict(
-                        label="Pause",
-                        method="animate",
-                        args=[
-                            [None],
-                            dict(
-                                mode="immediate",
-                                frame=dict(duration=0, redraw=True),
-                                transition=dict(duration=0),
-                            ),
-                        ],
-                    ),
-                ],
-            )
-        ],
+    # Merge with solution
+    merged = best_candidates.merge(
+        solution_df[["frame_index", "car_yaw_deg"]],
+        on="frame_index",
+        suffixes=("_candidate", "_solution"),
     )
+    merged["yaw_error"] = merged["candidate_yaw"] - merged["car_yaw_deg_solution"]
+    # Wrap error to [-180, 180]
+    merged["yaw_error"] = ((merged["yaw_error"] + 180) % 360) - 180
 
-    fig.show()
+    abs_error = merged["yaw_error"].abs()
+    print("=== Yaw Error Summary (Best Candidate vs Solution) ===")
+    print(f"  Frames evaluated:     {len(merged)}")
+    print(f"  Mean error:           {merged['yaw_error'].mean():.3f}°")
+    print(f"  Mean absolute error:  {abs_error.mean():.3f}°")
+    print(f"  Median abs error:     {abs_error.median():.3f}°")
+    print(f"  Std dev of error:     {merged['yaw_error'].std():.3f}°")
+    print(f"  RMSE:                 {np.sqrt((merged['yaw_error'] ** 2).mean()):.3f}°")
+    print(
+        f"  Max abs error:        {abs_error.max():.3f}° (frame {merged.loc[abs_error.idxmax(), 'frame_index']})"
+    )
+    print(
+        f"  Min abs error:        {abs_error.min():.3f}° (frame {merged.loc[abs_error.idxmin(), 'frame_index']})"
+    )
+    print(f"  % frames within 0.1°:  {(abs_error <= 0.1).mean() * 100:.1f}%")
+    print(f"  % frames within 0.5°:  {(abs_error <= 0.5).mean() * 100:.1f}%")
+    print(f"  % frames within 1.0°:  {(abs_error <= 1.0).mean() * 100:.1f}%")
+    print()
+
+    # Plot
+    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    axes[0].plot(
+        merged["frame_index"],
+        merged["candidate_yaw"],
+        label="Best Candidate Yaw",
+        color="steelblue",
+    )
+    axes[0].plot(
+        merged["frame_index"],
+        merged["car_yaw_deg_solution"],
+        label="Solution Yaw",
+        color="darkorange",
+        linestyle="--",
+    )
+    axes[0].set_ylabel("Yaw (degrees)")
+    axes[0].set_title("Best Candidate Yaw vs Solution Yaw")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(merged["frame_index"], merged["yaw_error"], color="crimson")
+    axes[1].axhline(0, color="black", linewidth=0.8, linestyle="--")
+    axes[1].set_ylabel("Error (degrees)")
+    axes[1].set_xlabel("Frame")
+    axes[1].set_title("Yaw Error (Candidate - Solution)")
+    axes[1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("yaw_comparison.png", dpi=150)
+    plt.show()
 
 
 def read_frame_results(path):
