@@ -6,96 +6,172 @@ from argparse import ArgumentParser
 from pathlib import Path
 from sklearn.linear_model import LinearRegression
 from scipy import stats
-
-mpl.rcParams.update(
-    {
-        # Font settings
-        "font.family": "serif",
-        # "font.serif": ["Times New Roman", "Times", "Computer Modern Roman"],
-        "mathtext.fontset": "cm",
-        # Font sizes scaled for 10pt LaTeX document
-        "font.size": 8,  # base font size
-        "axes.labelsize": 8,
-        "axes.titlesize": 8,
-        "xtick.labelsize": 6,
-        "ytick.labelsize": 6,
-        "legend.fontsize": 6,
-        # Figure aesthetics
-        "axes.linewidth": 0.8,
-        "lines.linewidth": 1.0,
-        "lines.markersize": 0.5,
-        "xtick.major.width": 0.8,
-        "ytick.major.width": 0.8,
-        # Save figures tightly
-        "figure.dpi": 300,
-        "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.02,
-    }
-)
-
-"""
-How can we measure the effect of the treatment on the WRMSE metric?
-
-I have an independent categorical variable which is treatment (tilt-aware) or no treatment (tilt-agnostic).
-I have a dependent continuous variable called the weighted rmse (WRMSE).
-I have a confounding variable that is also independent called the zenith angle.
-The zenith angle has an impact on the dependent variable.
-
-The treatment corresponds to a change in the algorithm.
-In the tilt-agnostic case, the zenith angle is not included in the algorithm.
-The treatment algorithm extends the control case to consider the zenith angle in its calculation.
-
-Since I have an algorithm, I can run both the treatment and control on identical inputs.
-This makes the test a within-condition comparison on paired data.
-I have 100 different input conditions, which correspond to real measured data.
-I want to test the hypothesis that the treatment reduces the dependent variable (WRMSE).
-
-"""
+import plotly.graph_objects as go
+from scipy.interpolate import griddata
 
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("control", type=Path)
-    parser.add_argument("treatment", type=Path)
+    parser.add_argument("PATH", type=Path)
     args = parser.parse_args()
 
-    df_control = pd.read_csv(args.control)
-    df_treatmt = pd.read_csv(args.treatment)
+    df = read_frame_results(args.PATH)
+    solution_df = read_results(args.PATH / "results.csv")
 
-    df = pd.merge(
-        df_control,
-        df_treatmt[["frame_index", "weighted_rmse"]],
-        how="inner",
-        on="frame_index",
+    df["candidate_yaw"] = ((df["car_yaw_deg"] + df["yaw_offset_deg"] + 180) % 360) - 180
+    df["delta_weighted_rmse"] = df["weighted_rmse"] - df.groupby("frame_index")[
+        "weighted_rmse"
+    ].transform("min")
+
+    frame_indices = sorted(df["frame_index"].unique())
+
+    # Build one frame per frame_index
+    frames = []
+    for fi in frame_indices:
+        frame_df = df[df["frame_index"] == fi].sort_values("candidate_yaw")
+        sol_row = solution_df[solution_df["frame_index"] == fi]
+
+        traces = [
+            go.Scatter(
+                x=frame_df["candidate_yaw"],
+                y=frame_df["delta_weighted_rmse"],
+                mode="lines+markers",
+                name="Error curve",
+                line=dict(color="steelblue"),
+                marker=dict(size=3),
+            )
+        ]
+
+        # Overlay the solution yaw as a vertical line if present
+        if not sol_row.empty:
+            sol_yaw = sol_row["car_yaw_deg"].values[0]
+            traces.append(
+                go.Scatter(
+                    x=[sol_yaw, sol_yaw],
+                    y=[0, frame_df["delta_weighted_rmse"].max()],
+                    mode="lines",
+                    name="Solution yaw",
+                    line=dict(color="red", width=2, dash="dash"),
+                )
+            )
+
+        frames.append(go.Frame(data=traces, name=str(fi)))
+
+    # Initial frame data
+    init_df = df[df["frame_index"] == frame_indices[0]].sort_values("candidate_yaw")
+    init_sol = solution_df[solution_df["frame_index"] == frame_indices[0]]
+
+    init_traces = [
+        go.Scatter(
+            x=init_df["candidate_yaw"],
+            y=init_df["delta_weighted_rmse"],
+            mode="lines+markers",
+            name="Error curve",
+            line=dict(color="steelblue"),
+            marker=dict(size=3),
+        )
+    ]
+    if not init_sol.empty:
+        sol_yaw = init_sol["car_yaw_deg"].values[0]
+        init_traces.append(
+            go.Scatter(
+                x=[sol_yaw, sol_yaw],
+                y=[0, init_df["delta_weighted_rmse"].max()],
+                mode="lines",
+                name="Solution yaw",
+                line=dict(color="red", width=2, dash="dash"),
+            )
+        )
+
+    fig = go.Figure(data=init_traces, frames=frames)
+
+    # Slider steps — one per frame
+    sliders = [
+        dict(
+            active=0,
+            currentvalue=dict(prefix="Frame: ", visible=True, xanchor="center"),
+            pad=dict(t=50),
+            steps=[
+                dict(
+                    method="animate",
+                    args=[
+                        [str(fi)],
+                        dict(
+                            mode="immediate",
+                            frame=dict(duration=0, redraw=True),
+                            transition=dict(duration=0),
+                        ),
+                    ],
+                    label=str(fi),
+                )
+                for fi in frame_indices
+            ],
+        )
+    ]
+
+    y_max = df["delta_weighted_rmse"].max()
+    fig.update_layout(
+        title="Yaw vs Delta RMSE",
+        xaxis_title="Candidate Yaw (deg)",
+        yaxis_title="Delta Weighted RMSE",
+        xaxis=dict(range=[-180, 180]),
+        yaxis=dict(range=[0, y_max * 1.05]),
+        sliders=sliders,
+        updatemenus=[
+            dict(
+                type="buttons",
+                showactive=False,
+                y=0,
+                x=0.5,
+                xanchor="center",
+                yanchor="top",
+                pad=dict(t=60),
+                buttons=[
+                    dict(
+                        label="Play",
+                        method="animate",
+                        args=[
+                            None,
+                            dict(
+                                frame=dict(duration=100, redraw=True),
+                                fromcurrent=True,
+                                transition=dict(duration=0),
+                            ),
+                        ],
+                    ),
+                    dict(
+                        label="Pause",
+                        method="animate",
+                        args=[
+                            [None],
+                            dict(
+                                mode="immediate",
+                                frame=dict(duration=0, redraw=True),
+                                transition=dict(duration=0),
+                            ),
+                        ],
+                    ),
+                ],
+            )
+        ],
     )
 
-    df["pitch"] = np.deg2rad(df["car_pitch_deg"])
-    df["roll"] = np.deg2rad(df["car_roll_deg"])
-    df["zenith_angle"] = np.arccos(np.cos(df["pitch"]) * np.cos(df["roll"]))
-    df["zenith_angle_deg"] = np.rad2deg(df["zenith_angle"])
+    fig.show()
 
-    # Paired t-test (two-sided by default)
-    t_stat, p_two_sided = stats.ttest_rel(df["weighted_rmse_x"], df["weighted_rmse_y"])
 
-    # Convert to one-sided test (treatment reduces WRMSE)
-    if t_stat > 0:
-        p_one_sided = p_two_sided / 2
-    else:
-        p_one_sided = 1 - (p_two_sided / 2)
+def read_frame_results(path):
+    frame_results = []
+    frame_result_paths = sorted(path.glob("frame_*_results.csv"))
 
-    print("---- SIGNIFICANCE")
-    print("t statistic:", t_stat)
-    print("One-sided p-value:", p_one_sided)
+    for path in frame_result_paths:
+        df = pd.read_csv(path)
+        frame_results.append(df)
 
-    differences = df["weighted_rmse_x"] - df["weighted_rmse_y"]
-    mean_diff = np.mean(differences)
-    std_diff = np.std(differences, ddof=1)
-    cohens_d = mean_diff / std_diff
+    return pd.concat(frame_results, ignore_index=True)
 
-    print("---- EFFECT SIZE")
-    print("Mean difference:", mean_diff)
-    print("Standard deviation of differences:", std_diff)
-    print("Cohen's d:", cohens_d)
+
+def read_results(path):
+    return pd.read_csv(path)
 
 
 if __name__ == "__main__":
