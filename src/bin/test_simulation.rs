@@ -1,7 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::{Jet, RayImage},
+    image::{Gray, Jet, RayImage, RayMap},
     optic::{Camera, PinholeOptic, RayDirection},
     simulation::Simulation,
 };
@@ -90,15 +90,35 @@ fn main() {
         });
 
         if config.write_images {
+            // Get measured dop as a byte.
+            let bytes = measured.dop_bytes(&Gray);
+
             for (prefix, ray_image) in [("simulated", &simulated), ("measured", &measured)] {
                 let filename = format!("{prefix}_aop_{i:04}.png");
                 let path = results_dir.join(&filename);
+                let aop_bytes = ray_image.aop_bytes(&Jet);
                 let _ = image::save_buffer(
                     path,
-                    &ray_image.aop_bytes(&Jet),
+                    &aop_bytes,
                     1224,
                     1024,
                     image::ExtendedColorType::Rgb8,
+                );
+
+                // Interleave alpha with RGB bytes.
+                let mut aop_with_alpha = Vec::with_capacity(bytes.len() * 4);
+                for (rgb, &a) in aop_bytes.chunks_exact(3).zip(&bytes) {
+                    aop_with_alpha.extend_from_slice(rgb);
+                    aop_with_alpha.push(a);
+                }
+                let filename = format!("{prefix}_aop_rgba_{i:04}.png");
+                let path = results_dir.join(&filename);
+                let _ = image::save_buffer(
+                    path,
+                    &aop_with_alpha,
+                    1224,
+                    1024,
+                    image::ExtendedColorType::Rgba8,
                 );
 
                 let filename = format!("{prefix}_dop_{i:04}.png");
