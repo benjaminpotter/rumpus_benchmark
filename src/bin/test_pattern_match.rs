@@ -70,7 +70,13 @@ fn main() {
 
         // Read the polarization image from this frame.
         let image_path = config.image_dir().join(image_path_from_frame(frame_index));
-        let image = image_reader.read_image(image_path).unwrap();
+        let image = match image_reader.read_image(image_path) {
+            Ok(image) => image,
+            Err(e) => {
+                eprintln!("failed to read image: {e}");
+                continue;
+            }
+        };
 
         let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
         let mut candidate_writer = csv::Writer::from_path(csv_path).unwrap();
