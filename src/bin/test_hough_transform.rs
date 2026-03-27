@@ -2,7 +2,7 @@ use chrono::Local;
 use clap::Parser;
 use rumpus::{
     image::RayImage,
-    optic::{Camera, PinholeOptic, RayDirection},
+    optic::{Camera, PinholeOptic, PixelCoordinate, RayDirection},
     prelude::{Aop, Dop},
     ray::GlobalFrame,
     simulation::Simulation,
@@ -10,7 +10,7 @@ use rumpus::{
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
     systems::{self, CamXyz, InsEnu, up_in_cam},
-    utils::{sensor_to_global, weighted_rmse},
+    utils::{angle_of, sensor_to_global, weighted_rmse},
 };
 use sguaba::engineering::Orientation;
 use std::{
@@ -81,9 +81,6 @@ fn main() {
             }
         };
 
-        let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
-        let mut candidate_writer = csv::Writer::from_path(csv_path).unwrap();
-
         let car_in_ins_enu = ins_frame.orientation;
         let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
         let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
@@ -99,7 +96,11 @@ fn main() {
         };
 
         let measured = sensor_to_global(&image, &up_pixel);
-        let estimated_yaw = hough_transform(measured);
+        let accum = hough_transform(&measured);
+        let estimated_yaw = accum.max();
+
+        let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
+        accum.to_csv(csv_path).unwrap();
 
         // Write results from this frame to the CSV file.
         let elapsed_ms = t0.elapsed().as_millis();
@@ -129,10 +130,48 @@ fn main() {
     }
 }
 
-fn hough_transform(ray_image: RayImage<GlobalFrame>) -> Angle {
+struct Accumulator {
+    votes: Vec<u64>,
+}
+
+impl Accumulator {
+    /// Create a new accumulator with
+    fn new(size: usize) -> Self {
+        let votes = vec![0; size];
+        Self { votes }
+    }
+
+    fn angle_to_index(angle: Angle, resolution: Angle) -> usize {
+        todo!()
+    }
+
+    fn index_to_angle(index: usize, resolution: Angle) -> Angle {
+        todo!()
+    }
+
+    fn vote(&mut self, angle: Angle) {
+        todo!()
+    }
+
+    fn max(&self) -> Angle {
+        todo!()
+    }
+
+    fn to_csv<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let mut writer = csv::Writer::from_path(path)?;
+
+        Ok(())
+    }
+}
+
+fn hough_transform(ray_image: &RayImage<GlobalFrame>) -> Accumulator {
     let aop_target = Aop::from_angle_wrapped(Angle::new::<degree>(90.));
     let aop_threshold = Angle::new::<degree>(0.1);
     let dop_threshold = Dop::clamped(0.2);
+    let angle_resolution = Angle::new::<degree>(0.1);
+    let origin = PixelCoordinate::new(512, 612);
+
+    let mut acc = Accumulator::new(angle_resolution);
 
     for px in ray_image.pixels() {
         let Some(ray) = px.ray() else {
@@ -147,10 +186,14 @@ fn hough_transform(ray_image: RayImage<GlobalFrame>) -> Angle {
             continue;
         }
 
+        let coord = PixelCoordinate::new(px.row(), px.col());
+        let angle = angle_of(coord, &origin);
+
         // add to accumulator
+        acc.vote(angle);
     }
 
-    todo!()
+    acc
 }
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {
@@ -222,4 +265,10 @@ struct FrameRecord {
     car_roll_deg: f64,
     car_yaw_deg: f64,
     estimated_yaw_deg: f64,
+}
+
+#[derive(serde::Serialize)]
+struct AccumulatorRecord {
+    angle_deg: f64,
+    votes: u64,
 }

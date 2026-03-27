@@ -43,7 +43,7 @@ pub fn sensor_to_global(
 
             let px_coord = PixelCoordinate::new(px.row(), px.col());
 
-            let shift = shift_by(px_coord, origin);
+            let shift = angle_of(px_coord, origin);
             let angle = ray.aop().into_global_frame(-shift);
             Some(Ray::<GlobalFrame>::new(angle, ray.dop()))
         })
@@ -53,7 +53,7 @@ pub fn sensor_to_global(
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn shift_by(coord: PixelCoordinate, origin: &PixelCoordinate) -> Angle {
+pub fn angle_of(coord: PixelCoordinate, origin: &PixelCoordinate) -> Angle {
     let y0 = origin.row() as f64;
     let x0 = origin.col() as f64;
 
