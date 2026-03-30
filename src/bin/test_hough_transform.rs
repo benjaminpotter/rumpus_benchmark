@@ -1,7 +1,8 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::RayImage,
+    image::{Gray, Jet, RayImage},
+    model::SkyModel,
     optic::{Camera, PinholeOptic, PixelCoordinate, RayDirection},
     prelude::{Aop, Dop},
     ray::GlobalFrame,
@@ -10,7 +11,7 @@ use rumpus::{
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
     systems::{self, CamXyz, InsEnu, up_in_cam},
-    utils::{angle_of, sensor_to_global, weighted_rmse},
+    utils::{angle_of, binary_threshold, sensor_to_global, weighted_rmse},
 };
 use sguaba::engineering::Orientation;
 use std::{
@@ -96,7 +97,8 @@ fn main() {
         };
 
         let measured = sensor_to_global(&image, &up_pixel);
-        let accum = hough_transform(&measured);
+        let binary_ray_image = binary_threshold(&measured);
+        let accum = hough_transform(&binary_ray_image);
         let estimated_yaw = accum.max();
 
         let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
@@ -113,6 +115,25 @@ fn main() {
             car_roll_deg: car_roll.get::<degree>(),
             estimated_yaw_deg: estimated_yaw.get::<degree>(),
         });
+
+        if config.write_images {
+            let filename = format!("aop_{frame_index:04}.png");
+            let path = results_dir.join(&filename);
+            let aop_bytes = measured.aop_bytes(&Jet);
+            let _ =
+                image::save_buffer(path, &aop_bytes, 1224, 1024, image::ExtendedColorType::Rgb8);
+
+            let filename = format!("binary_aop_{frame_index:04}.png");
+            let path = results_dir.join(&filename);
+            let binary_aop_bytes = binary_ray_image.aop_bytes(&Jet);
+            let _ = image::save_buffer(
+                path,
+                &binary_aop_bytes,
+                1224,
+                1024,
+                image::ExtendedColorType::Rgb8,
+            );
+        }
 
         print_frame_status(
             frame_index,
@@ -135,54 +156,67 @@ struct Accumulator {
 }
 
 impl Accumulator {
-    /// Create a new accumulator with
+    /// Create a new accumulator with `size` slots.
     fn new(size: usize) -> Self {
         let votes = vec![0; size];
         Self { votes }
     }
 
-    fn angle_to_index(angle: Angle, resolution: Angle) -> usize {
-        todo!()
+    fn slot_angle(&self) -> Angle {
+        Angle::new::<degree>(180.) / self.votes.len() as f64
     }
 
-    fn index_to_angle(index: usize, resolution: Angle) -> Angle {
-        todo!()
+    /// Convert an `angle` to a slot index.
+    fn angle_to_index(&self, angle: Angle) -> usize {
+        let normalized = angle.get::<degree>().rem_euclid(180.0);
+        let index = (normalized / self.slot_angle().get::<degree>()) as usize;
+        index.min(self.votes.len() - 1)
     }
 
+    /// Convert a slot `index` to an angle.
+    fn index_to_angle(&self, index: usize) -> Angle {
+        self.slot_angle() * index as f64
+    }
+
+    /// Increment the slot at `angle` by one.
     fn vote(&mut self, angle: Angle) {
-        todo!()
+        let index = self.angle_to_index(angle);
+        self.votes[index] += 1;
     }
 
+    /// Return the slot with the most votes.
     fn max(&self) -> Angle {
-        todo!()
+        let best_index = self
+            .votes
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, v)| *v)
+            .map_or(0, |(i, _)| i);
+        self.index_to_angle(best_index)
     }
 
+    /// Print a CSV with (slot angle, vote count) pairs.
     fn to_csv<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         let mut writer = csv::Writer::from_path(path)?;
-
+        for (index, &votes) in self.votes.iter().enumerate() {
+            writer.serialize(AccumulatorRecord {
+                angle_deg: self.index_to_angle(index).get::<degree>(),
+                votes,
+            })?;
+        }
+        writer.flush()?;
         Ok(())
     }
 }
 
 fn hough_transform(ray_image: &RayImage<GlobalFrame>) -> Accumulator {
-    let aop_target = Aop::from_angle_wrapped(Angle::new::<degree>(90.));
-    let aop_threshold = Angle::new::<degree>(0.1);
-    let dop_threshold = Dop::clamped(0.2);
-    let angle_resolution = Angle::new::<degree>(0.1);
+    let slot_count = 1800;
     let origin = PixelCoordinate::new(512, 612);
 
-    let mut acc = Accumulator::new(angle_resolution);
+    let mut acc = Accumulator::new(slot_count);
 
     for px in ray_image.pixels() {
-        let Some(ray) = px.ray() else {
-            continue;
-        };
-
-        if ray.dop() < dop_threshold {
-            continue;
-        }
-
-        if !ray.aop().in_thres(aop_target, aop_threshold) {
+        if px.ray().is_none() {
             continue;
         }
 

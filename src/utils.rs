@@ -1,6 +1,7 @@
 use rumpus::{
     image::RayImage,
     optic::PixelCoordinate,
+    prelude::{Aop, Dop},
     ray::{GlobalFrame, Ray, SensorFrame},
 };
 use uom::si::{
@@ -64,4 +65,18 @@ pub fn angle_of(coord: PixelCoordinate, origin: &PixelCoordinate) -> Angle {
     let x = x1 - x0;
 
     Angle::new::<radian>(y.atan2(x))
+}
+
+pub fn binary_threshold<F: Copy>(ray_image: &RayImage<F>) -> RayImage<F> {
+    let aop_target = Aop::from_angle_wrapped(Angle::new::<degree>(90.));
+    let aop_threshold = Angle::new::<degree>(0.1);
+    let dop_threshold = Dop::clamped(0.2);
+
+    let rays = ray_image.rays().map(|ray_opt| {
+        ray_opt.copied().filter(|&ray| {
+            ray.dop() >= dop_threshold && ray.aop().in_thres(aop_target, aop_threshold)
+        })
+    });
+
+    RayImage::from_rays(rays, ray_image.rows(), ray_image.cols()).unwrap()
 }
