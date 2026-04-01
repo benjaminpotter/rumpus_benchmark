@@ -1,7 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::{Gray, Jet, RayImage, RayMap},
+    image::{Binary, Gray, Jet, RayImage, RayMap},
     optic::{Camera, PinholeOptic, RayDirection},
     simulation::Simulation,
 };
@@ -79,11 +79,12 @@ fn main() {
 
         let weighted_rmse = weighted_rmse(&simulated, &measured);
 
-        let (_car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
+        let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
             frame_index: i,
             origin_row: up_pixel.row(),
             origin_col: up_pixel.col(),
+            car_yaw_deg: car_yaw.get::<degree>(),
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
             weighted_rmse,
@@ -133,6 +134,24 @@ fn main() {
             }
         }
 
+        if config.write_bins {
+            for (prefix, ray_image) in [("simulated", &simulated), ("measured", &measured)] {
+                let filename = format!("{prefix}_aop_{i:04}.bin");
+                let path = results_dir.join(&filename);
+                let aop_bytes = ray_image.aop_bytes(&Binary);
+                if std::fs::write(path, aop_bytes).is_err() {
+                    println!("failed to write binary aop data!");
+                }
+
+                let filename = format!("{prefix}_dop_{i:04}.bin");
+                let path = results_dir.join(&filename);
+                let dop_bytes = ray_image.dop_bytes(&Binary);
+                if std::fs::write(path, dop_bytes).is_err() {
+                    println!("failed to write binary dop data!");
+                }
+            }
+        }
+
         match config.max_frames {
             Some(max_frames) => println!(
                 "[{:04}/{:04}] frame {:04} in {:05} ms",
@@ -170,6 +189,9 @@ struct Cli {
 
     #[arg(short, long)]
     write_images: bool,
+    
+    #[arg(long)]
+    write_bins: bool,
 
     #[arg(short, long, default_value_t = 1)]
     step: usize,
@@ -196,6 +218,7 @@ struct Record {
     frame_index: usize,
     origin_row: usize,
     origin_col: usize,
+    car_yaw_deg: f64,
     car_pitch_deg: f64,
     car_roll_deg: f64,
     weighted_rmse: f64,
