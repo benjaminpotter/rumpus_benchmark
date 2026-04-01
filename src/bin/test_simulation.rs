@@ -74,9 +74,15 @@ fn main() {
         };
 
         let image_path = config.image_dir().join(image_path_from_frame(i));
-        let image = image_reader.read_image(image_path).unwrap();
-        let measured = sensor_to_global(&image, &up_pixel);
+        let image = match image_reader.read_image(image_path) {
+            Ok(image) => image,
+            Err(e) => {
+                eprintln!("failed to read image: {e}");
+                continue;
+            }
+        };
 
+        let measured = sensor_to_global(&image, &up_pixel);
         let weighted_rmse = weighted_rmse(&simulated, &measured);
 
         let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
