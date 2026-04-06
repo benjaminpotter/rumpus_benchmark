@@ -99,7 +99,7 @@ fn main() {
         let measured = sensor_to_global(&image, &up_pixel);
         let binary_ray_image = binary_threshold(&measured);
         let accum = hough_transform(&binary_ray_image);
-        let estimated_yaw = accum.max();
+        let estimated_solar_azimuth = accum.max();
 
         let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
         accum.to_csv(csv_path).unwrap();
@@ -113,7 +113,7 @@ fn main() {
             car_yaw_deg: car_yaw.get::<degree>(),
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
-            estimated_yaw_deg: estimated_yaw.get::<degree>(),
+            estimated_solar_azimuth_deg: estimated_solar_azimuth.get::<degree>(),
         });
 
         if config.write_images {
@@ -184,6 +184,33 @@ impl Accumulator {
         self.votes[index] += 1;
     }
 
+    /// Apply a mean filter kernel with `width` to `self.votes`.
+    fn mean_filter(&mut self, width: usize) {
+        if width <= 1 || self.votes.is_empty() {
+            return;
+        }
+
+        let n = self.votes.len();
+        let mut filtered_votes = vec![0; n];
+        let half_width = (width / 2) as i64;
+
+        for i in 0..n {
+            let mut sum: u64 = 0;
+            let mut count: u64 = 0;
+
+            for dw in -half_width..=half_width {
+                // Use modulo arithmetic to handle circular wrapping (0° wrap to 180°)
+                let idx = ((i as i64 + dw).rem_euclid(n as i64)) as usize;
+                sum += self.votes[idx];
+                count += 1;
+            }
+
+            filtered_votes[i] = sum / count;
+        }
+
+        self.votes = filtered_votes;
+    }
+
     /// Return the slot with the most votes.
     fn max(&self) -> Angle {
         let best_index = self
@@ -194,6 +221,7 @@ impl Accumulator {
             .map_or(0, |(i, _)| i);
         self.index_to_angle(best_index)
     }
+
 
     /// Print a CSV with (slot angle, vote count) pairs.
     fn to_csv<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
@@ -227,6 +255,7 @@ fn hough_transform(ray_image: &RayImage<GlobalFrame>) -> Accumulator {
         acc.vote(angle);
     }
 
+    acc.mean_filter(8);
     acc
 }
 
@@ -298,7 +327,7 @@ struct FrameRecord {
     car_pitch_deg: f64,
     car_roll_deg: f64,
     car_yaw_deg: f64,
-    estimated_yaw_deg: f64,
+    estimated_solar_azimuth_deg: f64,
 }
 
 #[derive(serde::Serialize)]
