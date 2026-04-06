@@ -11,7 +11,7 @@ use rumpus::{
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
     systems::{self, CamXyz, InsEnu, up_in_cam},
-    utils::{angle_of, binary_threshold, sensor_to_global, weighted_rmse},
+    utils::{angle_of, binary_threshold, sensor_to_global},
 };
 use sguaba::engineering::Orientation;
 use std::{

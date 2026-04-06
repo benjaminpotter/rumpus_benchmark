@@ -9,7 +9,7 @@ use uom::si::{
     f64::Angle,
 };
 
-pub fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -> f64 {
+pub fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>, dop_threshold: Dop) -> f64 {
     let mut sum_weighted_errors = 0.0f64;
     let mut sum_weights = 0.0f64;
     let mut samples = 0.;
@@ -19,6 +19,10 @@ pub fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>) -
             && let Some(simulated_ray) = simulated.ray(rpx.row(), rpx.col())
         {
             let weight = measured_ray.dop();
+            if weight < dop_threshold {
+                continue;
+            }
+
             let error = Angle::from(measured_ray.aop() - simulated_ray.aop())
                 .get::<degree>()
                 .powf(2.);

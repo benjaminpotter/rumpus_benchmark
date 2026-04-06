@@ -1,8 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    optic::{Camera, PinholeOptic, RayDirection},
-    simulation::Simulation,
+    optic::{Camera, PinholeOptic, RayDirection}, prelude::Dop, simulation::Simulation
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
@@ -44,6 +43,7 @@ fn main() {
     let time_frames = time_reader.read_csv(&time_path).unwrap();
 
     // Setup reader for polarization images.
+    let dop_threshold = config.dop_threshold();
     let image_reader = ImageReader::new();
 
     // Setup camera model.
@@ -112,7 +112,7 @@ fn main() {
             let measured = sensor_to_global(&image, &up_pixel);
             let simulation = Simulation::new(camera, cam_in_ecef, time_frame.time);
             let simulated = simulation.par_ray_image();
-            let weighted_rmse = weighted_rmse(&simulated, &measured);
+            let weighted_rmse = weighted_rmse(&simulated, &measured, dop_threshold);
 
             let _ = candidate_writer.serialize(CandidateRecord {
                 frame_index,
@@ -208,6 +208,9 @@ struct Cli {
 
     #[arg(short, long, default_value_t = 0.1)]
     resolution_deg: f64,
+
+    #[arg(long, default_value_t = 0.0)]
+    dop_threshold: f64,
 }
 
 impl Cli {
@@ -231,6 +234,10 @@ impl Cli {
 
     fn resolution(&self) -> Angle {
         Angle::new::<degree>(self.resolution_deg)
+    }
+
+    fn dop_threshold(&self) -> Dop {
+        Dop::clamped(self.dop_threshold)
     }
 }
 

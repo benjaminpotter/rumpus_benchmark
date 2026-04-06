@@ -1,9 +1,7 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::{Binary, Gray, Jet, RayImage, RayMap},
-    optic::{Camera, PinholeOptic, RayDirection},
-    simulation::Simulation,
+    image::{Binary, Gray, Jet, RayImage, RayMap}, optic::{Camera, PinholeOptic, RayDirection}, prelude::Dop, simulation::Simulation
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
@@ -42,6 +40,7 @@ fn main() {
     let focal_length = Length::new::<millimeter>(FOCAL_LENGTH_MM);
     let pixel_size = Length::new::<micron>(3.45);
     let image_reader = ImageReader::new();
+    let dop_threshold = Dop::zero();
     let camera = Camera::new(
         PinholeOptic::from_focal_length(focal_length),
         pixel_size * 2.0,
@@ -83,7 +82,7 @@ fn main() {
         };
 
         let measured = sensor_to_global(&image, &up_pixel);
-        let weighted_rmse = weighted_rmse(&simulated, &measured);
+        let weighted_rmse = weighted_rmse(&simulated, &measured, dop_threshold);
 
         let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let _ = writer.serialize(Record {
