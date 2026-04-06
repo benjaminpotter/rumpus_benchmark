@@ -101,6 +101,9 @@ fn main() {
         let accum = hough_transform(&binary_ray_image);
         let estimated_solar_azimuth = accum.max();
 
+        let car_lat = ins_frame.position.latitude().get::<degree>();
+        let car_lon = ins_frame.position.longitude().get::<degree>();
+
         let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
         accum.to_csv(csv_path).unwrap();
 
@@ -110,6 +113,9 @@ fn main() {
         let _ = frame_writer.serialize(FrameRecord {
             frame_index,
             elapsed_ms,
+            utc_time: time_frame.time.to_rfc3339(),
+            car_lat,
+            car_lon,
             car_yaw_deg: car_yaw.get::<degree>(),
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
@@ -324,6 +330,9 @@ impl Cli {
 struct FrameRecord {
     frame_index: usize,
     elapsed_ms: u128,
+    utc_time: String,
+    car_lat: f64,
+    car_lon: f64,
     car_pitch_deg: f64,
     car_roll_deg: f64,
     car_yaw_deg: f64,
