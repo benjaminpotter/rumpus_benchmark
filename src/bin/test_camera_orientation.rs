@@ -96,6 +96,7 @@ fn main() {
 
         let iters = config.iters_at_resolution(interval_size);
         for (orientation_index, cam_in_camxyz) in grid.iter().enumerate() {
+            let (cam_yaw, cam_pitch, cam_roll) = cam_in_camxyz.to_tait_bryan_angles();
             // Define orientation of the camera in the car frame.
             let cam_in_car = systems::cam_to_car().transform(cam_in_camxyz);
 
@@ -134,9 +135,9 @@ fn main() {
                     car_pitch_deg: car_pitch.get::<degree>(),
                     car_yaw_deg: car_yaw.get::<degree>(),
                     orientation_index,
-                    cam_roll_deg: 0., // TODO: update these values once i have the thing
-                    cam_pitch_deg: 0.,
-                    cam_yaw_deg: 0.,
+                    cam_roll_deg: cam_roll.get::<degree>(),
+                    cam_pitch_deg: cam_pitch.get::<degree>(),
+                    cam_yaw_deg: cam_yaw.get::<degree>(),
                     candidate_index,
                     yaw_offset_deg: yaw_offset.get::<degree>(),
                     weighted_rmse,
