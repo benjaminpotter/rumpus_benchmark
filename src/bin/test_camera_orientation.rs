@@ -75,7 +75,9 @@ fn main() {
             continue;
         }
 
-        print_frame_status(frame_index, frame_count, config.max_frames, None);
+        if config.verbose {
+            print_frame_status(frame_index, frame_count, config.max_frames, None);
+        }
 
         let t0 = Instant::now();
 
@@ -89,7 +91,7 @@ fn main() {
             }
         };
 
-        let interval_size = 10.;
+        let interval_size = 5.;
         let car_in_ins_enu = ins_frame.orientation;
         let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
         let mut yaw_offset = -Angle::new::<degree>(interval_size / 2.);
@@ -143,36 +145,40 @@ fn main() {
                     weighted_rmse,
                 });
 
-                match config.max_frames {
-                    Some(max_frames) => println!(
-                        "[{:04}/{:04}] frame {:04}: [{:04}/{:04}] candidate in {:05} ms",
-                        frame_count + 1,
-                        max_frames,
-                        frame_index,
-                        candidate_index + 1,
-                        iters,
-                        t1.elapsed().as_millis(),
-                    ),
-                    None => println!(
-                        "[{:04}/????] frame {:04}: [{:04}/{:04}] candidate in {:05} ms",
-                        frame_count + 1,
-                        frame_index,
-                        candidate_index + 1,
-                        iters,
-                        t1.elapsed().as_millis(),
-                    ),
+                if config.verbose {
+                    match config.max_frames {
+                        Some(max_frames) => println!(
+                            "[{:04}/{:04}] frame {:04}: [{:04}/{:04}] candidate in {:05} ms",
+                            frame_count + 1,
+                            max_frames,
+                            frame_index,
+                            candidate_index + 1,
+                            iters,
+                            t1.elapsed().as_millis(),
+                        ),
+                        None => println!(
+                            "[{:04}/????] frame {:04}: [{:04}/{:04}] candidate in {:05} ms",
+                            frame_count + 1,
+                            frame_index,
+                            candidate_index + 1,
+                            iters,
+                            t1.elapsed().as_millis(),
+                        ),
+                    }
                 }
 
                 yaw_offset += config.resolution();
             }
         }
 
-        print_frame_status(
-            frame_index,
-            frame_count,
-            config.max_frames,
-            Some(t0.elapsed().as_millis()),
-        );
+        if config.verbose {
+            print_frame_status(
+                frame_index,
+                frame_count,
+                config.max_frames,
+                Some(t0.elapsed().as_millis()),
+            );
+        }
 
         frame_count += 1;
         if let Some(max_frames) = config.max_frames
@@ -228,6 +234,9 @@ struct Cli {
 
     #[arg(long, default_value_t = 0.0)]
     dop_threshold: f64,
+
+    #[arg(short, long)]
+    verbose: bool,
 }
 
 impl Cli {
