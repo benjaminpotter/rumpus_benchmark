@@ -84,3 +84,5 @@ pub fn binary_threshold<F: Copy>(ray_image: &RayImage<F>) -> RayImage<F> {
 
     RayImage::from_rays(rays, ray_image.rows(), ray_image.cols()).unwrap()
 }
+
+
