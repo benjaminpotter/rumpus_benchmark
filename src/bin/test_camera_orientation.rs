@@ -91,16 +91,17 @@ fn main() {
             }
         };
 
+
         let interval_size = 5.;
         let car_in_ins_enu = ins_frame.orientation;
         let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
-        let mut yaw_offset = -Angle::new::<degree>(interval_size / 2.);
-
         let iters = config.iters_at_resolution(interval_size);
+
         for (orientation_index, cam_in_camxyz) in grid.iter().enumerate() {
             let (cam_yaw, cam_pitch, cam_roll) = cam_in_camxyz.to_tait_bryan_angles();
             // Define orientation of the camera in the car frame.
             let cam_in_car = systems::cam_to_car().transform(cam_in_camxyz);
+            let mut yaw_offset = -Angle::new::<degree>(interval_size / 2.);
 
             for candidate_index in 0..iters {
                 let t1 = Instant::now();
