@@ -6,7 +6,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 FIGURE_PATH = Path("figure")
-RESULTS_PATH = Path("benchmarks/bmk3.csv")
+RESULTS_PATH = Path("benchmarks/bmk4.csv")
 
 
 def main():
@@ -15,14 +15,28 @@ def main():
     df = read_results(RESULTS_PATH)
 
     for oi in range(0, 440, 10):
-        figname = f"wrmse_over_yaw_fi_125_oi_{oi}"
+        figname = f"wrmse_over_yaw_fi_125_oi_{oi:03}"
         fig = plot_wrmse_over_yaw(df, fi=125, oi=oi)
         save_figure(fig, figname, ["png"])
         plt.close()
 
-    figname = "wrmse_distribution"
-    fig = plot_wrmse_distribution(df)
+    for oi in range(190, 250, 1):
+        figname = f"wrmse_distribution_oi_{oi:03}"
+        fig = plot_wrmse_distribution(df, oi=oi)
+        save_figure(fig, figname, ["png"])
+        plt.close()
+
+    oi = 220
+    figname = f"wrmse_distribution_oi_{oi:03}"
+    fig = plot_wrmse_distribution(df, oi=oi)
     save_figure(fig, figname, ["pdf"])
+    plt.close()
+
+    oi = 199
+    figname = f"wrmse_distribution_oi_{oi:03}"
+    fig = plot_wrmse_distribution(df, oi=oi)
+    save_figure(fig, figname, ["pdf"])
+    plt.close()
 
 
 def plot_wrmse_over_yaw(df, fi=0, oi=0):
@@ -49,61 +63,80 @@ def plot_wrmse_over_yaw(df, fi=0, oi=0):
     return fig
 
 
-def plot_wrmse_distribution(df, orientation_index=0):
-    """
-    Generate a contour plot of normalized weighted_rmse values for datetime_utc (x axis) and yaw_offset_deg (y axis).
-    """
+def plot_wrmse_distribution(df, oi=0):
     # 1. Filter for the specific orientation
-    df_filtered = df[df["orientation_index"] == orientation_index].copy()
+    df_filtered = df[df["orientation_index"] == oi].copy()
 
     if df_filtered.empty:
-        print(f"No data found for orientation_index {orientation_index}")
+        print(f"No data found for orientation_index {oi}")
         return plt.subplots()[0]
 
-    # 2. Normalize the WRMSE values (0 to 1 scale)
-    max_val = df_filtered["weighted_rmse"].max()
-    min_val = df_filtered["weighted_rmse"].min()
-    df_filtered["normalized_wrmse"] = (df_filtered["weighted_rmse"] - min_val) / (max_val - min_val)
+    # --- NEW: Extract pitch and roll for annotation ---
+    # Since oi identifies a specific pitch/roll combo, we take the first occurrence
+    pitch = df_filtered["cam_pitch_deg"].iloc[0]
+    roll = df_filtered["cam_roll_deg"].iloc[0]
+    annotation_text = f"Pitch: {pitch:.1f}° | Roll: {roll:.1f}°"
 
-    # 3. Pivot the data to create a grid for the contour plot
-    # Index = Y-axis (Yaw), Columns = X-axis (Time), Values = Z-axis (RMSE)
+    group = df_filtered.groupby("frame_index")["weighted_rmse"]
+    rmin = group.transform("min")
+    rmax = group.transform("max")
+
+    # 2. Normalize the WRMSE values
+    df_filtered["normalized_wrmse"] = (df_filtered["weighted_rmse"] - rmin) / (rmax - rmin)
+
+    # 3. Pivot the data
     pivot_df = df_filtered.pivot(
         index="yaw_offset_deg", 
         columns="datetime_utc", 
         values="normalized_wrmse"
     )
-
-    # Convert columns to datetime objects if they aren't already to ensure proper spacing
     pivot_df.columns = pd.to_datetime(pivot_df.columns)
-    
-    # Sort to ensure the plot lines up correctly
     pivot_df = pivot_df.sort_index(axis=0).sort_index(axis=1)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # --- NEW: Reindex to expose gaps in time ---
+    # We find the smallest time difference to define our "grid step"
+    time_deltas = pd.Series(pivot_df.columns).diff().dropna()
+    if not time_deltas.empty:
+        min_delta = time_deltas.min()
+        # Create a full range from start to end using the detected frequency
+        full_time_range = pd.date_range(
+            start=pivot_df.columns.min(), 
+            end=pivot_df.columns.max(), 
+            freq=min_delta
+        )
+        # Reindexing inserts NaN columns for the missing time blocks (e.g., frames 251-999)
+        pivot_df = pivot_df.reindex(columns=full_time_range)
 
-    # 4. Create the contour plot
-    # Using 'levels' to define the granularity of the heatmap/contour
-    contour = ax.contourf(
+    fig, ax = plt.subplots()
+
+    # 4. Use pcolormesh to avoid interpolation
+    # shading='auto' handles the coordinates correctly for discrete cells
+    mesh = ax.pcolormesh(
         pivot_df.columns, 
         pivot_df.index, 
         pivot_df.values, 
-        levels=20, 
+        shading='auto',
         cmap="viridis"
     )
 
-    # 5. Aesthetics and Labels
-    ax.set_title(f"Normalized WRMSE Distribution (Orientation Index: {orientation_index})")
+    ax.text(
+        0.85, 0.95, 
+        annotation_text,
+        transform=ax.transAxes,
+        horizontalalignment='right',
+        verticalalignment='top',
+        fontsize=7,
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7, edgecolor="none")
+    )
+
+    # 5. Aesthetics
     ax.set_xlabel("Time (UTC)")
     ax.set_ylabel("Yaw Offset (deg)")
-    
-    # Rotate x-axis dates for better readability
     plt.xticks(rotation=45)
 
-    # Add a colorbar
-    cbar = fig.colorbar(contour)
-    cbar.set_label("Normalized WRMSE")
+    cbar = fig.colorbar(mesh)
+    cbar.set_label("Normalized Objective\nFunction ($J_{norm}$)")
 
-    fig.tight_layout()
     return fig
 
 

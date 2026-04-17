@@ -13,11 +13,11 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
-use uom::si::{
+use uom::{ConstZero, si::{
     angle::{degree, radian},
     f64::{Angle, Length},
     length::{micron, millimeter},
-};
+}};
 
 const FOCAL_LENGTH_MM: f64 = 8.0;
 
@@ -35,7 +35,8 @@ fn main() {
     let ins_frames = ins_reader.read_csv(&ins_path).unwrap();
 
     // Define orientation of the camera in the car frame.
-    let cam_in_car = systems::cam_to_car().transform(Orientation::<CamXyz>::aligned());
+    let cam_in_camxyz = config.cam_orientation();
+    let cam_in_car = systems::cam_to_car().transform(cam_in_camxyz);
 
     // Setup reader for INS time measurements.
     let time_path = config.time_path();
@@ -211,6 +212,12 @@ struct Cli {
 
     #[arg(long, default_value_t = 0.0)]
     dop_threshold: f64,
+
+    #[arg(long, default_value_t = 0.0)]
+    roll: f64,
+
+    #[arg(long, default_value_t = 0.0)]
+    pitch: f64,
 }
 
 impl Cli {
@@ -238,6 +245,14 @@ impl Cli {
 
     fn dop_threshold(&self) -> Dop {
         Dop::clamped(self.dop_threshold)
+    }
+
+    fn cam_orientation(&self) -> Orientation<CamXyz> {
+        Orientation::tait_bryan_builder()
+            .yaw(Angle::ZERO)
+            .pitch(Angle::new::<degree>(self.pitch))
+            .roll(Angle::new::<degree>(self.roll))
+            .build()
     }
 }
 
