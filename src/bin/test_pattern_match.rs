@@ -213,10 +213,10 @@ struct Cli {
     #[arg(long, default_value_t = 0.0)]
     dop_threshold: f64,
 
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, allow_hyphen_values = true, default_value_t = 0.0)]
     roll: f64,
 
-    #[arg(long, default_value_t = 0.0)]
+    #[arg(long, allow_hyphen_values = true, default_value_t = 0.0)]
     pitch: f64,
 }
 
