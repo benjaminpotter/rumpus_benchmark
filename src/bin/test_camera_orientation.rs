@@ -57,8 +57,8 @@ fn main() {
     // Construct a grid of orientations about the ideal _aligned_ orientation.
     let grid = OrientationGrid::<CamXyz>::builder()
         .relative_to(Orientation::<CamXyz>::aligned())
-        .with_roll_range(Angle::new::<degree>(-5.), Angle::new::<degree>(5.), Angle::new::<degree>(0.5))
-        .with_pitch_range(Angle::new::<degree>(-5.), Angle::new::<degree>(5.), Angle::new::<degree>(0.5))
+        .with_roll_range(Angle::new::<degree>(-2.5), Angle::new::<degree>(2.5), Angle::new::<degree>(0.25))
+        .with_pitch_range(Angle::new::<degree>(-2.5), Angle::new::<degree>(2.5), Angle::new::<degree>(0.25))
         .build();
 
     let mut frame_count = 0;
@@ -131,6 +131,7 @@ fn main() {
                 let simulated = simulation.par_ray_image();
                 let weighted_rmse = weighted_rmse(&simulated, &measured, dop_threshold);
 
+                let elapsed_ms = t1.elapsed().as_millis();
                 let _ = frame_writer.serialize(FrameRecord {
                     frame_index,
                     datetime_utc: time_frame.time.to_rfc3339(),
@@ -142,6 +143,7 @@ fn main() {
                     cam_pitch_deg: cam_pitch.get::<degree>(),
                     cam_yaw_deg: cam_yaw.get::<degree>(),
                     candidate_index,
+                    elapsed_ms,
                     yaw_offset_deg: yaw_offset.get::<degree>(),
                     weighted_rmse,
                 });
@@ -155,7 +157,7 @@ fn main() {
                             frame_index,
                             candidate_index + 1,
                             iters,
-                            t1.elapsed().as_millis(),
+                            elapsed_ms
                         ),
                         None => println!(
                             "[{:04}/????] frame {:04}: [{:04}/{:04}] candidate in {:05} ms",
@@ -163,7 +165,7 @@ fn main() {
                             frame_index,
                             candidate_index + 1,
                             iters,
-                            t1.elapsed().as_millis(),
+                            elapsed_ms
                         ),
                     }
                 }
@@ -294,6 +296,7 @@ struct FrameRecord {
     cam_pitch_deg: f64,
     cam_yaw_deg: f64,
     candidate_index: usize,
+    elapsed_ms: u128,
     yaw_offset_deg: f64,
     weighted_rmse: f64,
 }
