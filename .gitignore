@@ -4,3 +4,5 @@ benchmarks/bmk3.csv
 benchmarks/bmk4.csv
 figure/png/wrmse_over_yaw*
 figure/png/wrmse_distribution*
+perf.data
+perf.data.old
