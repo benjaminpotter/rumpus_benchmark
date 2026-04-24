@@ -13,3 +13,10 @@
 
 - The hopefully final need for another dataset
 - Everything the same as bmk3 but hopefully just works.
+
+## bmk5
+
+- Ran the test_camera_orientation on the urban01 dataset
+- hoping that this resolves the problems with that run
+- also used more granular pitch and roll resolution
+
