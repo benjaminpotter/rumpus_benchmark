@@ -33,42 +33,59 @@ fn main() {
 
     let time = "2025-11-24T15:37:35Z".parse::<DateTime<Utc>>().unwrap();
     let aligned = Orientation::<CamXyz>::aligned();
-    let misaligned = Orientation::<CamXyz>::tait_bryan_builder()
-        .yaw(Angle::ZERO)
-        .pitch(Angle::new::<degree>(-0.25))
-        .roll(Angle::new::<degree>(-0.25))
+
+    let misalignment_grid = OrientationGrid::<CamXyz>::builder()
+        .relative_to(Orientation::<CamXyz>::aligned())
+        .with_pitch_range(
+            Angle::new::<degree>(-0.5),
+            Angle::new::<degree>(0.5),
+            Angle::new::<degree>(0.25),
+        )
+        .with_roll_range(
+            Angle::new::<degree>(-0.5),
+            Angle::new::<degree>(0.5),
+            Angle::new::<degree>(0.25),
+        )
         .build();
 
     // Construct a grid of orientations about the _aligned_ orientation.
-    let grid = OrientationGrid::<InsEnu>::builder()
+    let yaw_grid = OrientationGrid::<InsEnu>::builder()
         .relative_to(Orientation::<InsEnu>::aligned())
         .with_yaw_range(
             Angle::new::<degree>(-180.),
             Angle::new::<degree>(179.),
-            Angle::new::<degree>(1.),
+            Angle::new::<degree>(5.),
         )
         .build();
 
-    for (orientation_index, car_in_enu) in grid.iter().enumerate().progress() {
-        let misaligned_cam_in_ecef = camxyz_to_ecef(misaligned, car_in_enu);
-        let simulation = Simulation::new(camera, misaligned_cam_in_ecef, time);
-        let misaligned_ray_image = simulation.par_ray_image();
+    for (misalignment_index, misaligned) in misalignment_grid.iter().enumerate().progress() {
+        for (yaw_index, car_in_enu) in yaw_grid.iter().enumerate().progress() {
+            let misaligned_cam_in_ecef = camxyz_to_ecef(misaligned, car_in_enu);
+            let simulation = Simulation::new(camera, misaligned_cam_in_ecef, time);
+            let misaligned_ray_image = simulation.par_ray_image();
 
-        let aligned_cam_in_ecef = camxyz_to_ecef(aligned, car_in_enu);
-        let simulation = Simulation::new(camera, aligned_cam_in_ecef, time);
-        let aligned_ray_image = simulation.par_ray_image();
+            let aligned_cam_in_ecef = camxyz_to_ecef(aligned, car_in_enu);
+            let simulation = Simulation::new(camera, aligned_cam_in_ecef, time);
+            let aligned_ray_image = simulation.par_ray_image();
 
-        let dop_threshold = Dop::clamped(0.0);
-        let weighted_rmse = weighted_rmse(&misaligned_ray_image, &aligned_ray_image, dop_threshold);
+            let dop_threshold = Dop::clamped(0.0);
+            let weighted_rmse =
+                weighted_rmse(&misaligned_ray_image, &aligned_ray_image, dop_threshold);
 
-        let (car_yaw, car_pitch, car_roll) = car_in_enu.to_tait_bryan_angles();
-        let _ = frame_writer.serialize(FrameRecord {
-            orientation_index,
-            car_roll_deg: car_roll.get::<degree>(),
-            car_pitch_deg: car_pitch.get::<degree>(),
-            car_yaw_deg: car_yaw.get::<degree>(),
-            weighted_rmse,
-        });
+            let (cam_yaw, cam_pitch, cam_roll) = misaligned.to_tait_bryan_angles();
+            let (car_yaw, car_pitch, car_roll) = car_in_enu.to_tait_bryan_angles();
+            let _ = frame_writer.serialize(FrameRecord {
+                misalignment_index,
+                cam_roll_deg: cam_roll.get::<degree>(),
+                cam_pitch_deg: cam_pitch.get::<degree>(),
+                cam_yaw_deg: cam_yaw.get::<degree>(),
+                yaw_index,
+                car_roll_deg: car_roll.get::<degree>(),
+                car_pitch_deg: car_pitch.get::<degree>(),
+                car_yaw_deg: car_yaw.get::<degree>(),
+                weighted_rmse,
+            });
+        }
     }
 }
 
@@ -107,7 +124,11 @@ fn setup_camera_model() -> Camera<PinholeOptic> {
 
 #[derive(serde::Serialize)]
 struct FrameRecord {
-    orientation_index: usize,
+    misalignment_index: usize,
+    cam_roll_deg: f64,
+    cam_pitch_deg: f64,
+    cam_yaw_deg: f64,
+    yaw_index: usize,
     car_roll_deg: f64,
     car_pitch_deg: f64,
     car_yaw_deg: f64,
