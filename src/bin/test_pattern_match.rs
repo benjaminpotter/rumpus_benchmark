@@ -1,7 +1,9 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    optic::{Camera, PinholeOptic, RayDirection}, prelude::Dop, simulation::Simulation
+    optic::{Camera, PinholeOptic, RayDirection},
+    prelude::Dop,
+    simulation::Simulation,
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
@@ -13,11 +15,14 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
-use uom::{ConstZero, si::{
-    angle::{degree, radian},
-    f64::{Angle, Length},
-    length::{micron, millimeter},
-}};
+use uom::{
+    ConstZero,
+    si::{
+        angle::{degree, radian},
+        f64::{Angle, Length},
+        length::{micron, millimeter},
+    },
+};
 
 const FOCAL_LENGTH_MM: f64 = 8.0;
 

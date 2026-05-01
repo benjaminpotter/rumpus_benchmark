@@ -1,14 +1,21 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    optic::{Camera, PinholeOptic, RayDirection}, prelude::Dop, simulation::Simulation
+    optic::{Camera, PinholeOptic, RayDirection},
+    prelude::Dop,
+    simulation::Simulation,
 };
 use rumpus_benchmark::{
-    grid::OrientationGrid, io::{ImageReader, InsReader, TimeReader}, systems::{self, CamXyz, InsEnu, up_in_cam}, utils::{sensor_to_global, weighted_rmse}
+    grid::OrientationGrid,
+    io::{ImageReader, InsReader, TimeReader},
+    systems::{self, CamXyz, InsEnu, up_in_cam},
+    utils::{sensor_to_global, weighted_rmse},
 };
 use sguaba::engineering::Orientation;
 use std::{
-    ops::Range, path::{Path, PathBuf}, time::Instant
+    ops::Range,
+    path::{Path, PathBuf},
+    time::Instant,
 };
 use uom::si::{
     angle::{degree, radian},
@@ -57,8 +64,16 @@ fn main() {
     // Construct a grid of orientations about the ideal _aligned_ orientation.
     let grid = OrientationGrid::<CamXyz>::builder()
         .relative_to(Orientation::<CamXyz>::aligned())
-        .with_roll_range(Angle::new::<degree>(-2.5), Angle::new::<degree>(2.5), Angle::new::<degree>(0.25))
-        .with_pitch_range(Angle::new::<degree>(-2.5), Angle::new::<degree>(2.5), Angle::new::<degree>(0.25))
+        .with_roll_range(
+            Angle::new::<degree>(-2.5),
+            Angle::new::<degree>(2.5),
+            Angle::new::<degree>(0.25),
+        )
+        .with_pitch_range(
+            Angle::new::<degree>(-2.5),
+            Angle::new::<degree>(2.5),
+            Angle::new::<degree>(0.25),
+        )
         .build();
 
     let mut frame_count = 0;
@@ -91,7 +106,6 @@ fn main() {
             }
         };
 
-
         let interval_size = 5.;
         let car_in_ins_enu = ins_frame.orientation;
         let (car_yaw, car_pitch, car_roll) = car_in_ins_enu.to_tait_bryan_angles();
@@ -114,7 +128,8 @@ fn main() {
                     .build();
 
                 let cam_in_ins_enu = systems::car_to_ins(car_in_ins_enu).transform(cam_in_car);
-                let cam_in_ecef = systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
+                let cam_in_ecef =
+                    systems::ins_to_ecef(&ins_frame.position).transform(cam_in_ins_enu);
 
                 let up = up_in_cam(car_in_ins_enu).normalized();
                 let azimuth = up.y().atan2(up.x());
@@ -300,5 +315,3 @@ struct FrameRecord {
     yaw_offset_deg: f64,
     weighted_rmse: f64,
 }
-
-
