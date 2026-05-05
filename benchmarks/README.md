@@ -20,3 +20,7 @@
 - hoping that this resolves the problems with that run
 - also used more granular pitch and roll resolution
 
+## bmk6
+
+- Ran the test_camera_orientation on the rmc dataset
+

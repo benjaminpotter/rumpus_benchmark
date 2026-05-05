@@ -9,7 +9,11 @@ use uom::si::{
     f64::Angle,
 };
 
-pub fn weighted_rmse<F: Copy>(simulated: &RayImage<F>, measured: &RayImage<F>, dop_threshold: Dop) -> f64 {
+pub fn weighted_rmse<F: Copy>(
+    simulated: &RayImage<F>,
+    measured: &RayImage<F>,
+    dop_threshold: Dop,
+) -> f64 {
     let mut sum_weighted_errors = 0.0f64;
     let mut sum_weights = 0.0f64;
     let mut samples = 0.;
@@ -84,5 +88,3 @@ pub fn binary_threshold<F: Copy>(ray_image: &RayImage<F>) -> RayImage<F> {
 
     RayImage::from_rays(rays, ray_image.rows(), ray_image.cols()).unwrap()
 }
-
-

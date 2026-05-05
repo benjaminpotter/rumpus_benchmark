@@ -1,7 +1,10 @@
 use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::{Binary, Gray, Jet, RayImage, RayMap}, optic::{Camera, PinholeOptic, RayDirection}, prelude::Dop, simulation::Simulation
+    image::{Binary, Gray, Jet, RayImage, RayMap},
+    optic::{Camera, PinholeOptic, RayDirection},
+    prelude::Dop,
+    simulation::Simulation,
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
@@ -194,7 +197,7 @@ struct Cli {
 
     #[arg(short, long)]
     write_images: bool,
-    
+
     #[arg(long)]
     write_bins: bool,
 
