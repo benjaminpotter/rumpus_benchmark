@@ -1,9 +1,9 @@
 use sguaba::{
-    Vector,
+    Bearing, Vector,
     engineering::Orientation,
     math::RigidBodyTransform,
     system,
-    systems::{Ecef, Wgs84},
+    systems::{BearingDefined, Ecef, Wgs84},
     vector,
 };
 use uom::{
@@ -25,6 +25,50 @@ system!(pub struct CarXyz using right-handed XYZ);
 
 // The earth bounded frame provided by the INS.
 system!(pub struct InsEnu using ENU);
+
+impl BearingDefined for CamXyz {
+    fn bearing_to_spherical(bearing: sguaba::Bearing<Self>) -> (Angle, Angle) {
+        let polar = Angle::HALF_TURN / 2. - bearing.elevation();
+        let azimuth = bearing.azimuth();
+
+        (polar, azimuth)
+    }
+
+    fn spherical_to_bearing(
+        polar: impl Into<Angle>,
+        azimuth: impl Into<Angle>,
+    ) -> Option<sguaba::Bearing<Self>> {
+        let elevation = Angle::HALF_TURN / 2. - polar.into();
+        Some(
+            Bearing::builder()
+                .azimuth(azimuth)
+                .elevation(elevation)?
+                .build(),
+        )
+    }
+}
+
+impl BearingDefined for CarXyz {
+    fn bearing_to_spherical(bearing: sguaba::Bearing<Self>) -> (Angle, Angle) {
+        let polar = Angle::HALF_TURN / 2. - bearing.elevation();
+        let azimuth = bearing.azimuth();
+
+        (polar, azimuth)
+    }
+
+    fn spherical_to_bearing(
+        polar: impl Into<Angle>,
+        azimuth: impl Into<Angle>,
+    ) -> Option<sguaba::Bearing<Self>> {
+        let elevation = Angle::HALF_TURN / 2. - polar.into();
+        Some(
+            Bearing::builder()
+                .azimuth(azimuth)
+                .elevation(elevation)?
+                .build(),
+        )
+    }
+}
 
 impl InsEnu {
     pub fn orientation_from_inspva(azimuth: f64, pitch: f64, roll: f64) -> Orientation<Self> {

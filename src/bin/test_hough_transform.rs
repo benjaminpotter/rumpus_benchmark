@@ -1,27 +1,26 @@
-use chrono::Local;
 use clap::Parser;
 use rumpus::{
-    image::{Gray, Jet, RayImage},
-    model::SkyModel,
+    image::{Jet, RayImage},
     optic::{Camera, PinholeOptic, PixelCoordinate, RayDirection},
-    prelude::{Aop, Dop},
     ray::GlobalFrame,
-    simulation::Simulation,
 };
 use rumpus_benchmark::{
     io::{ImageReader, InsReader, TimeReader},
     systems::{self, CamXyz, InsEnu, up_in_cam},
     utils::{angle_of, binary_threshold, sensor_to_global},
 };
-use sguaba::engineering::Orientation;
+use sguaba::{Bearing, bearing, engineering::Orientation, vector};
 use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
-use uom::si::{
-    angle::{degree, radian},
-    f64::{Angle, Length},
-    length::{micron, millimeter},
+use uom::{
+    ConstZero,
+    si::{
+        angle::{degree, radian},
+        f64::{Angle, Length},
+        length::{micron, millimeter},
+    },
 };
 
 const FOCAL_LENGTH_MM: f64 = 8.0;
@@ -30,9 +29,8 @@ fn main() {
     let config = Cli::parse();
 
     // Make a new directory to hold results.
-    let timestamp = Local::now().to_rfc3339();
-    let results_dir = PathBuf::from(&timestamp);
-    std::fs::create_dir(&results_dir).unwrap();
+    let results_dir = PathBuf::from("results");
+    std::fs::create_dir_all(&results_dir).unwrap();
 
     // Setup reader for INS position and orientation measurements.
     let ins_path = config.ins_path();
@@ -100,12 +98,24 @@ fn main() {
         let binary_ray_image = binary_threshold(&measured);
         let accum = hough_transform(&binary_ray_image);
         let estimated_solar_azimuth = accum.max();
+        let solar_bearing_camxyz = Bearing::<CamXyz>::builder()
+            .azimuth(estimated_solar_azimuth)
+            .elevation(Angle::ZERO)
+            .expect("elevation is in [-90°, 90°]")
+            .build();
+
+        let solar_bearing_carxyz = systems::cam_to_car().transform(solar_bearing_camxyz);
+        let solar_bearing_insenu =
+            systems::car_to_ins(car_in_ins_enu).transform(solar_bearing_carxyz);
+
+        let accumulator_dump = results_dir.join(format!("accumulator_{frame_index:04}.csv"));
+        let _ = accum.to_csv(&accumulator_dump);
 
         let car_lat = ins_frame.position.latitude().get::<degree>();
         let car_lon = ins_frame.position.longitude().get::<degree>();
 
-        let csv_path = results_dir.join(format!("frame_{frame_index:04}_results.csv"));
-        accum.to_csv(csv_path).unwrap();
+        let solar_position =
+            spa::solar_position::<spa::StdFloatOps>(time_frame.time, car_lat, car_lon).unwrap();
 
         // Write results from this frame to the CSV file.
         let elapsed_ms = t0.elapsed().as_millis();
@@ -119,26 +129,17 @@ fn main() {
             car_yaw_deg: car_yaw.get::<degree>(),
             car_pitch_deg: car_pitch.get::<degree>(),
             car_roll_deg: car_roll.get::<degree>(),
-            estimated_solar_azimuth_deg: estimated_solar_azimuth.get::<degree>(),
+            // clockwise from north
+            solar_azimuth_deg: solar_position.azimuth,
+            solar_zenith_deg: solar_position.zenith_angle,
+            estimated_solar_azimuth_camxyz_deg: solar_bearing_camxyz.azimuth().get::<degree>(),
+            estimated_solar_azimuth_carxyz_deg: solar_bearing_carxyz.azimuth().get::<degree>(),
+            estimated_solar_azimuth_insenu_deg: solar_bearing_insenu.azimuth().get::<degree>(),
+            accumulator_dump,
         });
 
         if config.write_images {
-            let filename = format!("aop_{frame_index:04}.png");
-            let path = results_dir.join(&filename);
-            let aop_bytes = measured.aop_bytes(&Jet);
-            let _ =
-                image::save_buffer(path, &aop_bytes, 1224, 1024, image::ExtendedColorType::Rgb8);
-
-            let filename = format!("binary_aop_{frame_index:04}.png");
-            let path = results_dir.join(&filename);
-            let binary_aop_bytes = binary_ray_image.aop_bytes(&Jet);
-            let _ = image::save_buffer(
-                path,
-                &binary_aop_bytes,
-                1224,
-                1024,
-                image::ExtendedColorType::Rgb8,
-            );
+            write_images(&results_dir, frame_index, measured, binary_ray_image);
         }
 
         print_frame_status(
@@ -190,6 +191,16 @@ impl Accumulator {
         self.votes[index] += 1;
     }
 
+    fn votes(self) -> Vec<u64> {
+        self.votes
+    }
+
+    fn angles(&self) -> Vec<Angle> {
+        (0..self.votes.len())
+            .map(|i| self.index_to_angle(i))
+            .collect()
+    }
+
     /// Apply a mean filter kernel with `width` to `self.votes`.
     fn mean_filter(&mut self, width: usize) {
         if width <= 1 || self.votes.is_empty() {
@@ -228,7 +239,6 @@ impl Accumulator {
         self.index_to_angle(best_index)
     }
 
-
     /// Print a CSV with (slot angle, vote count) pairs.
     fn to_csv<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         let mut writer = csv::Writer::from_path(path)?;
@@ -241,6 +251,12 @@ impl Accumulator {
         writer.flush()?;
         Ok(())
     }
+}
+
+#[derive(serde::Serialize)]
+struct AccumulatorRecord {
+    angle_deg: f64,
+    votes: u64,
 }
 
 fn hough_transform(ray_image: &RayImage<GlobalFrame>) -> Accumulator {
@@ -267,6 +283,32 @@ fn hough_transform(ray_image: &RayImage<GlobalFrame>) -> Accumulator {
 
 fn image_path_from_frame(frame_index: usize) -> impl AsRef<Path> {
     format!("camera_driver_gv_vis_image_raw_{:04}.png", frame_index)
+}
+
+fn write_images<P, F>(
+    results_dir: P,
+    frame_index: usize,
+    measured: RayImage<F>,
+    binary_ray_image: RayImage<F>,
+) where
+    F: Copy,
+    P: AsRef<Path>,
+{
+    let filename = format!("aop_{frame_index:04}.png");
+    let path = results_dir.as_ref().join(&filename);
+    let aop_bytes = measured.aop_bytes(&Jet);
+    let _ = image::save_buffer(path, &aop_bytes, 1224, 1024, image::ExtendedColorType::Rgb8);
+
+    let filename = format!("binary_aop_{frame_index:04}.png");
+    let path = results_dir.as_ref().join(&filename);
+    let binary_aop_bytes = binary_ray_image.aop_bytes(&Jet);
+    let _ = image::save_buffer(
+        path,
+        &binary_aop_bytes,
+        1224,
+        1024,
+        image::ExtendedColorType::Rgb8,
+    );
 }
 
 fn print_frame_status(
@@ -336,11 +378,10 @@ struct FrameRecord {
     car_pitch_deg: f64,
     car_roll_deg: f64,
     car_yaw_deg: f64,
-    estimated_solar_azimuth_deg: f64,
-}
-
-#[derive(serde::Serialize)]
-struct AccumulatorRecord {
-    angle_deg: f64,
-    votes: u64,
+    accumulator_dump: PathBuf,
+    solar_azimuth_deg: f64,
+    solar_zenith_deg: f64,
+    estimated_solar_azimuth_insenu_deg: f64,
+    estimated_solar_azimuth_camxyz_deg: f64,
+    estimated_solar_azimuth_carxyz_deg: f64,
 }

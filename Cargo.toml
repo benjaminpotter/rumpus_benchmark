@@ -14,4 +14,5 @@ rumpus = { git = "https://github.com/benjaminpotter/rumpus.git", tag="0.5.2" }
 # rumpus = { path = "../rumpus" }
 serde = { version = "1.0.228", features = ["derive"] }
 sguaba = "0.9.11"
+spa = "0.5.1"
 uom = "0.37.0"
