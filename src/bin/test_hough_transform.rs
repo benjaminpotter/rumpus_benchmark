@@ -1,3 +1,4 @@
+use chrono::Local;
 use clap::Parser;
 use rumpus::{
     image::{Jet, RayImage},
@@ -29,8 +30,9 @@ fn main() {
     let config = Cli::parse();
 
     // Make a new directory to hold results.
-    let results_dir = PathBuf::from("results");
-    std::fs::create_dir_all(&results_dir).unwrap();
+    let timestamp = Local::now().to_rfc3339();
+    let results_dir = PathBuf::from(&timestamp);
+    std::fs::create_dir(&results_dir).unwrap();
 
     // Setup reader for INS position and orientation measurements.
     let ins_path = config.ins_path();
